@@ -292,12 +292,12 @@ open class NHentai(
 
         if (script == null) {
             return getHentaiDataFromSvelteScript()
-                ?: throw Exception("Unable to locate nhentai gallery JSON script")
+                ?: error("No se pudo obtener la galería. Puede ser Cloudflare, ID inválido o cambio de sitio. Intenta abrir en WebView o revisa tu conexión.")
         }
 
         val encodedData = dataRegex.find(script)?.groupValues?.getOrNull(2)
             ?: return getHentaiDataFromSvelteScript()
-                ?: throw Exception("Unable to parse nhentai gallery JSON payload")
+                ?: error("No se pudo extraer el JSON de la galería. El sitio puede haber cambiado o hay un bloqueo de red.")
         return encodedData.parseAs()
     }
 
