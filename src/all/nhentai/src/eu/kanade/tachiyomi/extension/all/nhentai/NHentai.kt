@@ -259,9 +259,10 @@ open class NHentai(
     override fun pageListParse(document: Document): List<Page> {
         // 1. Verificación de Cloudflare / Captcha
         val title = document.select("title").text()
-        if (title.contains("Just a moment", ignoreCase = true) || 
+        if (title.contains("Just a moment", ignoreCase = true) ||
             title.contains("Cloudflare", ignoreCase = true) ||
-            document.select(".cf-browser-verification, #challenge-running").isNotEmpty()) {
+            document.select(".cf-browser-verification, #challenge-running").isNotEmpty()
+        ) {
             throw Exception("Protección de Cloudflare activa. Toca el ícono del mundo (WebView) arriba, resuelve el Captcha, y vuelve a intentar.")
         }
 
@@ -275,7 +276,7 @@ open class NHentai(
 
         val cdnUrls = document.getCdnUrls(thumbnail = false)
             .ifEmpty { fallbackImageCdnUrls }
-            
+
         val pagePaths = data.getPagePaths()
         val extensions = data.getPageExtensions()
 
