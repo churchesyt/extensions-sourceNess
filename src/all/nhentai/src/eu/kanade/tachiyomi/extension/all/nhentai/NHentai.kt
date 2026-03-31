@@ -347,9 +347,11 @@ open class NHentai(
         val match = regex.find(html)
         return if (match != null) {
             val cdnJson = match.groupValues[1]
-            runCatching { cdnJson.parseAs<List<String>>() }.getOrDefault(emptyList())
+            runCatching { cdnJson.parseAs<List<String>>() }.getOrDefault(
+                if (thumbnail) fallbackThumbCdnUrls else fallbackImageCdnUrls
+            )
         } else {
-            emptyList()
+            if (thumbnail) fallbackThumbCdnUrls else fallbackImageCdnUrls
         }
     }
 
