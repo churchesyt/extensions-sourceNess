@@ -291,7 +291,7 @@ open class NHentai(
                 val imageUrl = if (path.startsWith("http://") || path.startsWith("https://")) {
                     path
                 } else {
-                    "https://${cdnUrls.random()}$path"
+                    "https://${cdnUrls.random()}/${path.removePrefix("/")}"
                 }
                 Page(index = i, imageUrl = imageUrl)
             }
