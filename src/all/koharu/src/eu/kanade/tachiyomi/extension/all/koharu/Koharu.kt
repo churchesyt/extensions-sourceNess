@@ -579,4 +579,5 @@ class Koharu(
         val clearance: String? = null,
         val error: String? = null,
     )
+    }
 }
