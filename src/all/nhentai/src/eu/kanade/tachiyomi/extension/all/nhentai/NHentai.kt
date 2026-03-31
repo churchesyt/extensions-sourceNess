@@ -256,22 +256,25 @@ open class NHentai(
         val data = document.getHentaiData()
         val cdnUrls = document.getCdnUrls(thumbnail = false)
         val pagePaths = data.getPagePaths()
+        val fallbackCdn = "i.nhentai.net"
 
         if (pagePaths.isNotEmpty()) {
             return pagePaths.mapIndexed { i, path ->
                 val imageUrl = if (path.startsWith("http://") || path.startsWith("https://")) {
                     path
                 } else {
-                    "https://${cdnUrls.random()}$path"
+                    val cdn = cdnUrls.randomOrNull() ?: fallbackCdn
+                    "https://$cdn$path"
                 }
                 Page(index = i, imageUrl = imageUrl)
             }
         }
 
         return data.getPageExtensions().mapIndexed { i, extension ->
+            val cdn = cdnUrls.randomOrNull() ?: fallbackCdn
             Page(
                 index = i,
-                imageUrl = "https://${cdnUrls.random()}/galleries/${data.media_id}/${i + 1}.$extension",
+                imageUrl = "https://$cdn/galleries/${data.media_id}/${i + 1}.$extension",
             )
         }
     }
@@ -338,9 +341,13 @@ open class NHentai(
             },
         )
         val html = body().html()
-        val cdnJson = regex.find(html)!!.groupValues[1]
-
-        return cdnJson.parseAs<List<String>>()
+        val match = regex.find(html)
+        return if (match != null) {
+            val cdnJson = match.groupValues[1]
+            runCatching { cdnJson.parseAs<List<String>>() }.getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
     }
 
     override fun getFilterList(): FilterList = FilterList(
