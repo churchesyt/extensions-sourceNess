@@ -44,6 +44,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import rx.Observable
 import uy.kohesive.injekt.injectLazy
@@ -193,7 +194,7 @@ fun getClearance(): String? {
                                     val authClient = network.cloudflareClient
                                     val checkRequest = okhttp3.Request.Builder()
                                         .url("https://auth.schale.network/check")
-                                        .post(okhttp3.RequestBody.create(null, ByteArray(0)))
+                                        .post("".toRequestBody(null))
                                         .header("Authorization", "Bearer ${json.session}")
                                         .header("Origin", domainUrl)
                                         .header("Referer", "$domainUrl/")
