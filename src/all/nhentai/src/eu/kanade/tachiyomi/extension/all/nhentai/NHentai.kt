@@ -74,6 +74,10 @@ open class NHentai(
     private val hentaiSelector = "script:containsData(JSON.parse)"
     private fun String.shortenTitle() = this.replace(shortenTitleRegex, "").trim()
 
+    // Dominios CDN hardcodeados como fallback si el sitio no los inyecta en el HTML
+    private val fallbackImageCdnUrls = listOf("i3.nhentai.net", "i5.nhentai.net", "i7.nhentai.net")
+    private val fallbackThumbCdnUrls = listOf("t3.nhentai.net")
+
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         ListPreference(screen.context).apply {
             key = TITLE_PREF
@@ -152,8 +156,6 @@ open class NHentai(
             return GET(url.build(), headers)
         } else {
             val url = "$baseUrl/search/".toHttpUrl().newBuilder()
-                // Blank query (Multi + sort by popular month/week/day) shows a 404 page
-                // Searching for `""` is a hacky way to return everything without any filtering
                 .addQueryParameter("q", "$query $nhLangSearch$advQuery".ifBlank { "\"\"" })
                 .addQueryParameter("page", offsetPage.toString())
 
@@ -209,7 +211,10 @@ open class NHentai(
 
     override fun mangaDetailsParse(document: Document): SManga {
         val data = document.getHentaiData()
-        val cdnUrl = document.getCdnUrls(thumbnail = true).random()
+        // FIX: usar fallback si getCdnUrls retorna lista vacía
+        val cdnUrl = document.getCdnUrls(thumbnail = true)
+            .ifEmpty { fallbackThumbCdnUrls }
+            .random()
         val resolvedTitle = when {
             displayFullTitle -> data.title.english ?: data.title.japanese ?: data.title.pretty ?: "Unknown title"
             else -> data.title.pretty ?: (data.title.english ?: data.title.japanese)?.shortenTitle() ?: "Unknown title"
@@ -221,7 +226,6 @@ open class NHentai(
             status = SManga.COMPLETED
             artist = getArtists(data)
             author = getGroups(data) ?: getArtists(data)
-            // Some people want these additional details in description
             description = "Full English and Japanese titles:\n"
                 .plus("${data.title.english ?: data.title.japanese ?: data.title.pretty ?: ""}\n")
                 .plus(data.title.japanese ?: "")
@@ -254,27 +258,26 @@ open class NHentai(
 
     override fun pageListParse(document: Document): List<Page> {
         val data = document.getHentaiData()
+        // FIX: si getCdnUrls retorna vacío, usar fallback hardcodeado
         val cdnUrls = document.getCdnUrls(thumbnail = false)
+            .ifEmpty { fallbackImageCdnUrls }
         val pagePaths = data.getPagePaths()
-        val fallbackCdn = "i.nhentai.net"
 
         if (pagePaths.isNotEmpty()) {
             return pagePaths.mapIndexed { i, path ->
                 val imageUrl = if (path.startsWith("http://") || path.startsWith("https://")) {
                     path
                 } else {
-                    val cdn = cdnUrls.randomOrNull() ?: fallbackCdn
-                    "https://$cdn$path"
+                    "https://${cdnUrls.random()}$path"
                 }
                 Page(index = i, imageUrl = imageUrl)
             }
         }
 
         return data.getPageExtensions().mapIndexed { i, extension ->
-            val cdn = cdnUrls.randomOrNull() ?: fallbackCdn
             Page(
                 index = i,
-                imageUrl = "https://$cdn/galleries/${data.media_id}/${i + 1}.$extension",
+                imageUrl = "https://${cdnUrls.random()}/galleries/${data.media_id}/${i + 1}.$extension",
             )
         }
     }
