@@ -214,7 +214,7 @@ open class NHentai(
             displayFullTitle -> data.title.english ?: data.title.japanese ?: data.title.pretty ?: "Unknown title"
             else -> data.title.pretty ?: (data.title.english ?: data.title.japanese)?.shortenTitle() ?: "Unknown title"
         }
-        val firstPageExt = data.images.pages.firstOrNull()?.extension ?: "jpg"
+        val firstPageExt = data.getPageExtensions().firstOrNull() ?: "jpg"
         return SManga.create().apply {
             title = resolvedTitle
             thumbnail_url = "https://$cdnUrl/galleries/${data.media_id}/1t.$firstPageExt"
@@ -226,7 +226,7 @@ open class NHentai(
                 .plus("${data.title.english ?: data.title.japanese ?: data.title.pretty ?: ""}\n")
                 .plus(data.title.japanese ?: "")
                 .plus("\n\n")
-                .plus("Pages: ${data.images.pages.size}\n")
+                .plus("Pages: ${data.getPageCount()}\n")
                 .plus("Favorited by: ${data.num_favorites}\n")
                 .plus(getTagDescription(data))
             genre = getTags(data)
@@ -255,11 +255,23 @@ open class NHentai(
     override fun pageListParse(document: Document): List<Page> {
         val data = document.getHentaiData()
         val cdnUrls = document.getCdnUrls(thumbnail = false)
+        val pagePaths = data.getPagePaths()
 
-        return data.images.pages.mapIndexed { i, image ->
+        if (pagePaths.isNotEmpty()) {
+            return pagePaths.mapIndexed { i, path ->
+                val imageUrl = if (path.startsWith("http://") || path.startsWith("https://")) {
+                    path
+                } else {
+                    "https://${cdnUrls.random()}$path"
+                }
+                Page(index = i, imageUrl = imageUrl)
+            }
+        }
+
+        return data.getPageExtensions().mapIndexed { i, extension ->
             Page(
                 index = i,
-                imageUrl = "https://${cdnUrls.random()}/galleries/${data.media_id}/${i + 1}.${image.extension}",
+                imageUrl = "https://${cdnUrls.random()}/galleries/${data.media_id}/${i + 1}.$extension",
             )
         }
     }
@@ -271,12 +283,47 @@ open class NHentai(
 
         val script = scripts.firstOrNull { "media_id" in it && "images" in it }
             ?: scripts.firstOrNull()
-            ?: throw Exception("Unable to locate nhentai gallery JSON script")
+
+        if (script == null) {
+            return getHentaiDataFromSvelteScript()
+                ?: throw Exception("Unable to locate nhentai gallery JSON script")
+        }
 
         val encodedData = dataRegex.find(script)?.groupValues?.getOrNull(2)
-            ?: throw Exception("Unable to parse nhentai gallery JSON payload")
+            ?: return getHentaiDataFromSvelteScript()
+                ?: throw Exception("Unable to parse nhentai gallery JSON payload")
         return encodedData.parseAs()
     }
+
+    private fun Document.getHentaiDataFromSvelteScript(): Hentai? {
+        val wrappers = select("script[type=application/json][data-url*=/api/v2/galleries/]")
+            .mapNotNull { script ->
+                runCatching { script.data().parseAs<SvelteFetchedResponse>() }
+                    .getOrNull()
+            }
+
+        val body = wrappers.firstOrNull { it.status in 200..299 && it.body.contains("\"media_id\"") }?.body
+            ?: wrappers.firstOrNull { it.status in 200..299 }?.body
+            ?: return null
+
+        return runCatching { body.parseAs<Hentai>() }.getOrNull()
+    }
+
+    private fun Hentai.getPageExtensions(): List<String> {
+        val fromImages = images.pages.mapNotNull { image ->
+            image.extension.ifBlank { null }
+        }
+        if (fromImages.isNotEmpty()) return fromImages
+
+        return pages.mapNotNull { page ->
+            page.path.substringAfterLast('.', "").substringBefore('?').ifBlank { null }
+        }
+    }
+
+    private fun Hentai.getPagePaths(): List<String> = pages.map { page -> page.path }
+
+    private fun Hentai.getPageCount(): Int =
+        if (images.pages.isNotEmpty()) images.pages.size else pages.size
 
     private fun Document.getHentaiDataOrNull(): Hentai? {
         return runCatching { getHentaiData() }.getOrNull()
