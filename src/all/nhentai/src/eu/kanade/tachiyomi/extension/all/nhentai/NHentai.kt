@@ -71,7 +71,7 @@ open class NHentai(
 
     private val shortenTitleRegex = Regex("""(\[[^]]*]|[({][^)}]*[)}])""")
     private val dataRegex = Regex("""JSON\.parse\(\s*(['\"])(.*?)\1\s*\)""", setOf(RegexOption.DOT_MATCHES_ALL))
-    private val hentaiSelector = "script:containsData(JSON.parse):not(:containsData(media_server)):not(:containsData(avatar_url))"
+    private val hentaiSelector = "script:containsData(JSON.parse)"
     private fun String.shortenTitle() = this.replace(shortenTitleRegex, "").trim()
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
@@ -265,8 +265,14 @@ open class NHentai(
     }
 
     private fun Document.getHentaiData(): Hentai {
-        val script = selectFirst(hentaiSelector)?.data()
+        val scripts = select(hentaiSelector)
+            .map { it.data() }
+            .filter { "JSON.parse(" in it }
+
+        val script = scripts.firstOrNull { "media_id" in it && "images" in it }
+            ?: scripts.firstOrNull()
             ?: throw Exception("Unable to locate nhentai gallery JSON script")
+
         val encodedData = dataRegex.find(script)?.groupValues?.getOrNull(2)
             ?: throw Exception("Unable to parse nhentai gallery JSON payload")
         return encodedData.parseAs()
