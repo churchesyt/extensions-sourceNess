@@ -6,6 +6,12 @@ apply plugin: 'org.jmailen.kotlinter'
 assert !ext.has("pkgNameSuffix")
 assert !ext.has("libVersion")
 
+def globalAppNameSuffix = (project.findProperty("ness.appNameSuffix") ?: "").toString()
+def globalPackageSuffix = (project.findProperty("ness.packageSuffix") ?: "").toString()
+if (globalPackageSuffix && !globalPackageSuffix.startsWith(".")) {
+    globalPackageSuffix = ".${globalPackageSuffix}"
+}
+
 assert extName.chars().max().asInt < 0x180 : "Extension name should be romanized"
 
 Project theme = ext.has("themePkg") ? project(":lib-multisrc:$themePkg") : null
@@ -27,7 +33,7 @@ android {
     defaultConfig {
         minSdk AndroidConfig.minSdk
         targetSdk AndroidConfig.targetSdk
-        applicationIdSuffix project.parent.name + "." + project.name
+        applicationIdSuffix project.parent.name + "." + project.name + globalPackageSuffix
         versionCode theme == null ? extVersionCode : theme.baseVersionCode + overrideVersionCode
         versionName "1.4.$versionCode"
         base {
@@ -35,7 +41,7 @@ android {
         }
         assert extClass.startsWith(".")
         manifestPlaceholders = [
-                appName : "Tachiyomi: $extName",
+            appName : "Tachiyomi: ${extName}${globalAppNameSuffix}",
                 extClass: extClass,
                 nsfw    : project.ext.find("isNsfw") ? 1 : 0,
         ]
