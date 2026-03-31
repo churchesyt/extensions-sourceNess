@@ -257,12 +257,34 @@ open class NHentai(
     override fun chapterListSelector() = throw UnsupportedOperationException()
 
     override fun pageListParse(document: Document): List<Page> {
-        val data = document.getHentaiData()
-        // FIX: si getCdnUrls retorna vacío, usar fallback hardcodeado
+        // 1. Verificación de Cloudflare / Captcha
+        val title = document.select("title").text()
+        if (title.contains("Just a moment", ignoreCase = true) || 
+            title.contains("Cloudflare", ignoreCase = true) ||
+            document.select(".cf-browser-verification, #challenge-running").isNotEmpty()) {
+            throw Exception("Protección de Cloudflare activa. Toca el ícono del mundo (WebView) arriba, resuelve el Captcha, y vuelve a intentar.")
+        }
+
+        // 2. Extraer datos con manejo de errores
+        val data = try {
+            document.getHentaiData()
+        } catch (e: Exception) {
+            // Si getHentaiData() falla, mostramos este error en la pantalla del usuario
+            throw Exception("Error al cargar las imágenes: ${e.message}\nIntenta abrir en WebView (ícono del mundo) para revisar si la galería fue eliminada o requiere cuenta.")
+        }
+
         val cdnUrls = document.getCdnUrls(thumbnail = false)
             .ifEmpty { fallbackImageCdnUrls }
+            
         val pagePaths = data.getPagePaths()
+        val extensions = data.getPageExtensions()
 
+        // 3. Verificar si realmente se encontraron páginas
+        if (pagePaths.isEmpty() && extensions.isEmpty()) {
+            throw Exception("No se encontraron páginas en esta galería. Puede estar corrupta o el formato de NHentai cambió.")
+        }
+
+        // 4. Mapear las imágenes si todo salió bien
         if (pagePaths.isNotEmpty()) {
             return pagePaths.mapIndexed { i, path ->
                 val imageUrl = if (path.startsWith("http://") || path.startsWith("https://")) {
@@ -274,7 +296,7 @@ open class NHentai(
             }
         }
 
-        return data.getPageExtensions().mapIndexed { i, extension ->
+        return extensions.mapIndexed { i, extension ->
             Page(
                 index = i,
                 imageUrl = "https://${cdnUrls.random()}/galleries/${data.media_id}/${i + 1}.$extension",
@@ -348,14 +370,12 @@ open class NHentai(
         return if (match != null) {
             val cdnJson = match.groupValues[1]
             runCatching { cdnJson.parseAs<List<String>>() }.getOrDefault(
-                if (thumbnail) fallbackThumbCdnUrls else fallbackImageCdnUrls
+                if (thumbnail) fallbackThumbCdnUrls else fallbackImageCdnUrls,
             )
         } else {
-            if (thumbnail) fallbackThumbCdnUrls else fallbackImageCdnUrls,
+            if (thumbnail) fallbackThumbCdnUrls else fallbackImageCdnUrls
         }
     }
-
-//hola
 
     override fun getFilterList(): FilterList = FilterList(
         Filter.Header("Separate tags with commas (,)"),
