@@ -1,6 +1,7 @@
 import html
 import sys
 import json
+import os
 from pathlib import Path
 import shutil
 
@@ -32,6 +33,27 @@ else:
 
 with LOCAL_REPO.joinpath("index.min.json").open(encoding="utf-8") as local_index_file:
     local_index = json.load(local_index_file)
+
+repo_json_path = REMOTE_REPO.joinpath("repo.json")
+local_repo_json_path = LOCAL_REPO.joinpath("repo.json")
+
+if local_repo_json_path.exists():
+    shutil.copy2(local_repo_json_path, repo_json_path)
+elif not repo_json_path.exists():
+    github_repo = os.environ.get("GITHUB_REPOSITORY", "churchesyt/extensions-sourceNess")
+    repo_json = {
+        "meta": {
+            "name": os.environ.get("REPO_NAME", "Ness Extension Repo"),
+            "shortName": os.environ.get("REPO_SHORT_NAME", "Ness"),
+            "website": os.environ.get("REPO_WEBSITE", f"https://github.com/{github_repo}"),
+            "signingKeyFingerprint": os.environ.get(
+                "REPO_SIGNING_KEY_FINGERPRINT",
+                "d1069eb69ad2ab0b33fc2570da054c1c362eb655e4d3cb50adb3bd7d2a40387a",
+            ),
+        }
+    }
+    with repo_json_path.open("w", encoding="utf-8") as repo_json_file:
+        json.dump(repo_json, repo_json_file, ensure_ascii=False, indent=2)
 
 index = [
     item for item in remote_index
