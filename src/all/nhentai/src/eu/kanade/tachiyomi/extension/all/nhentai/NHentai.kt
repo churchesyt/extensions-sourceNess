@@ -351,7 +351,7 @@ open class NHentai(
                 if (thumbnail) fallbackThumbCdnUrls else fallbackImageCdnUrls
             )
         } else {
-            if (thumbnail) fallbackThumbCdnUrls else fallbackImageCdnUrls
+            if (thumbnail) fallbackThumbCdnUrls else fallbackImageCdnUrls,
         }
     }
 
