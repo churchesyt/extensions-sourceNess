@@ -70,7 +70,7 @@ open class NHentai(
     }
 
     private val shortenTitleRegex = Regex("""(\[[^]]*]|[({][^)}]*[)}])""")
-    private val dataRegex = Regex("""JSON\.parse\(\s*"(.*)"\s*\)""")
+    private val dataRegex = Regex("""JSON\.parse\(\s*(['\"])(.*?)\1\s*\)""", setOf(RegexOption.DOT_MATCHES_ALL))
     private val hentaiSelector = "script:containsData(JSON.parse):not(:containsData(media_server)):not(:containsData(avatar_url))"
     private fun String.shortenTitle() = this.replace(shortenTitleRegex, "").trim()
 
@@ -210,9 +210,14 @@ open class NHentai(
     override fun mangaDetailsParse(document: Document): SManga {
         val data = document.getHentaiData()
         val cdnUrl = document.getCdnUrls(thumbnail = true).random()
+        val resolvedTitle = when {
+            displayFullTitle -> data.title.english ?: data.title.japanese ?: data.title.pretty ?: "Unknown title"
+            else -> data.title.pretty ?: (data.title.english ?: data.title.japanese)?.shortenTitle() ?: "Unknown title"
+        }
+        val firstPageExt = data.images.pages.firstOrNull()?.extension ?: "jpg"
         return SManga.create().apply {
-            title = if (displayFullTitle) data.title.english ?: data.title.japanese ?: data.title.pretty!! else data.title.pretty ?: (data.title.english ?: data.title.japanese)!!.shortenTitle()
-            thumbnail_url = "https://$cdnUrl/galleries/${data.media_id}/1t.${data.images.pages[0].extension}"
+            title = resolvedTitle
+            thumbnail_url = "https://$cdnUrl/galleries/${data.media_id}/1t.$firstPageExt"
             status = SManga.COMPLETED
             artist = getArtists(data)
             author = getGroups(data) ?: getArtists(data)
@@ -232,12 +237,12 @@ open class NHentai(
     override fun chapterListRequest(manga: SManga): Request = GET("$baseUrl${manga.url}", headers)
 
     override fun chapterListParse(response: Response): List<SChapter> {
-        val data = response.asJsoup().getHentaiData()
+        val data = response.asJsoup().getHentaiDataOrNull()
         return listOf(
             SChapter.create().apply {
                 name = "Chapter"
-                scanlator = getGroups(data)
-                date_upload = data.upload_date * 1000
+                scanlator = data?.let(::getGroups)
+                date_upload = (data?.upload_date ?: 0L) * 1000
                 setUrlWithoutDomain(response.request.url.encodedPath)
             },
         )
@@ -260,8 +265,15 @@ open class NHentai(
     }
 
     private fun Document.getHentaiData(): Hentai {
-        val script = selectFirst(hentaiSelector)!!.data()
-        return dataRegex.find(script)!!.groupValues[1].parseAs()
+        val script = selectFirst(hentaiSelector)?.data()
+            ?: throw Exception("Unable to locate nhentai gallery JSON script")
+        val encodedData = dataRegex.find(script)?.groupValues?.getOrNull(2)
+            ?: throw Exception("Unable to parse nhentai gallery JSON payload")
+        return encodedData.parseAs()
+    }
+
+    private fun Document.getHentaiDataOrNull(): Hentai? {
+        return runCatching { getHentaiData() }.getOrNull()
     }
 
     private fun Document.getCdnUrls(thumbnail: Boolean): List<String> {
