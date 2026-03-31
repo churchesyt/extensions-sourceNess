@@ -355,6 +355,8 @@ open class NHentai(
         }
     }
 
+//hola
+
     override fun getFilterList(): FilterList = FilterList(
         Filter.Header("Separate tags with commas (,)"),
         Filter.Header("Prepend with dash (-) to exclude"),
