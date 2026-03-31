@@ -75,8 +75,8 @@ open class NHentai(
     private fun String.shortenTitle() = this.replace(shortenTitleRegex, "").trim()
 
     // Dominios CDN hardcodeados como fallback si el sitio no los inyecta en el HTML
-    private val fallbackImageCdnUrls = listOf("i3.nhentai.net", "i5.nhentai.net", "i7.nhentai.net")
-    private val fallbackThumbCdnUrls = listOf("t3.nhentai.net")
+    private val fallbackImageCdnUrls = listOf("i.nhentai.net", "i3.nhentai.net")
+    private val fallbackThumbCdnUrls = listOf("t.nhentai.net")
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         ListPreference(screen.context).apply {
