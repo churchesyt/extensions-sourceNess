@@ -578,5 +578,5 @@ class Koharu(
         val session: String? = null,
         val clearance: String? = null,
         val error: String? = null,
-    ) 
+    )
 }
