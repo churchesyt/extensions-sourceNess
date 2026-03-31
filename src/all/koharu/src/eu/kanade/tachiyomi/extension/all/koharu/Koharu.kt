@@ -155,32 +155,77 @@ class Koharu(
     private var _clearance: String? = null
 
     @SuppressLint("SetJavaScriptEnabled")
-    fun getClearance(): String? {
-        _clearance?.also { return it }
-        val latch = CountDownLatch(1)
-        handler.post {
-            val webview = WebView(context)
-            with(webview.settings) {
-                javaScriptEnabled = true
-                domStorageEnabled = true
-                databaseEnabled = true
-                blockNetworkImage = true
-            }
-            webview.webViewClient = object : WebViewClient() {
-                override fun onPageFinished(view: WebView?, url: String?) {
-                    view!!.evaluateJavascript("window.localStorage.getItem('clearance')") { clearance ->
-                        webview.stopLoading()
-                        webview.destroy()
-                        _clearance = clearance.takeUnless { it == "null" }?.removeSurrounding("\"")
+fun getClearance(): String? {
+    _clearance?.also { return it }
+    val latch = CountDownLatch(1)
+    handler.post {
+        val webview = WebView(context)
+        with(webview.settings) {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            databaseEnabled = true
+            blockNetworkImage = true
+        }
+        webview.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                view!!.evaluateJavascript(
+                    """
+                    (function() {
+                        var tokenRaw = window.localStorage.getItem('token');
+                        var clearance = window.localStorage.getItem('clearance');
+                        if (!tokenRaw) return JSON.stringify({error: 'no_token'});
+                        var token = JSON.parse(tokenRaw);
+                        return JSON.stringify({session: token.session, clearance: clearance});
+                    })()
+                    """.trimIndent()
+                ) { result ->
+                    webview.stopLoading()
+                    webview.destroy()
+                    try {
+                        val json = Json.decodeFromString<TokenResult>(
+                            result.removeSurrounding("\"").replace("\\\"", "\"")
+                        )
+                        _clearance = json.clearance
+                        // Ahora hacer el POST /check con el session token
+                        if (json.session != null) {
+                            CoroutineScope(Dispatchers.IO).launch {
+                                runCatching {
+                                    val authClient = network.cloudflareClient
+                                    val checkRequest = okhttp3.Request.Builder()
+                                        .url("https://auth.schale.network/check")
+                                        .post(okhttp3.RequestBody.create(null, ByteArray(0)))
+                                        .header("Authorization", "Bearer ${json.session}")
+                                        .header("Origin", domainUrl)
+                                        .header("Referer", "$domainUrl/")
+                                        .build()
+                                    authClient.newCall(checkRequest).execute().close()
+
+                                    val clearanceRequest = okhttp3.Request.Builder()
+                                        .url("https://auth.schale.network/clearance")
+                                        .header("Authorization", "Bearer ${json.session}")
+                                        .header("Origin", domainUrl)
+                                        .header("Referer", "$domainUrl/")
+                                        .build()
+                                    val clearanceResponse = authClient.newCall(clearanceRequest).execute()
+                                    _clearance = clearanceResponse.body.string().trim().removeSurrounding("\"")
+                                    clearanceResponse.close()
+                                }
+                                latch.countDown()
+                            }
+                        } else {
+                            latch.countDown()
+                        }
+                    } catch (e: Exception) {
                         latch.countDown()
                     }
                 }
             }
-            webview.loadUrl("$domainUrl/")
         }
-        latch.await(10, TimeUnit.SECONDS)
-        return _clearance
+        webview.loadUrl("$domainUrl/")
     }
+    latch.await(15, TimeUnit.SECONDS)
+    return _clearance
+}
 
     private fun getManga(book: Entry) = SManga.create().apply {
         setUrlWithoutDomain("${book.id}/${book.key}")
@@ -527,4 +572,10 @@ class Koharu(
 
         internal val dateReformat = SimpleDateFormat("EEEE, d MMM yyyy HH:mm (z)", Locale.ENGLISH)
     }
+    @kotlinx.serialization.Serializable
+    private data class TokenResult(
+        val session: String? = null,
+        val clearance: String? = null,
+        val error: String? = null,
+    )
 }
