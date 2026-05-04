@@ -8,7 +8,7 @@ import android.util.Log
 import kotlin.system.exitProcess
 
 /**
- * Springboard that accepts https://tmohentai.com/contents/:id intents and redirects them to
+ * Springboard that accepts https://tmohentai.app/contents/:id intents and redirects them to
  * the main Tachiyomi process.
  */
 class TMOHentaiUrlActivity : Activity() {
