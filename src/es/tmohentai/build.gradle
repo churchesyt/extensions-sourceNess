@@ -1,7 +1,7 @@
 ext {
-    extName = 'TMOHentai'
+    extName = 'TMOHentaiApp'
     extClass = '.TMOHentai'
-    extVersionCode = 10
+    extVersionCode = 12
     isNsfw = true
 }
 
