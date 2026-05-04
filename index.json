@@ -18621,19 +18621,19 @@
     ]
   },
   {
-    "name": "Tachiyomi: TMOHentai(Ness)",
+    "name": "Tachiyomi: TMOHentaiApp(Ness)",
     "pkg": "eu.kanade.tachiyomi.extension.es.tmohentai",
-    "apk": "tachiyomi-es.tmohentai-v1.4.10.apk",
+    "apk": "tachiyomi-es.tmohentai-v1.4.12.apk",
     "lang": "es",
-    "code": 10,
-    "version": "1.4.10",
+    "code": 12,
+    "version": "1.4.12",
     "nsfw": 1,
     "sources": [
       {
         "name": "TMOHentai",
         "lang": "es",
         "id": "8385948079634749158",
-        "baseUrl": "https://tmohentai.com",
+        "baseUrl": "https://tmohentai.app",
         "versionId": 1
       }
     ]
