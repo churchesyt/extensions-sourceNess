@@ -73,6 +73,7 @@ open class NHentai(
     private val dataRegex = Regex("""JSON\.parse\(\s*(['\"])(.*?)\1\s*\)""", setOf(RegexOption.DOT_MATCHES_ALL))
     private val hentaiSelector = "script:containsData(JSON.parse)"
     private fun String.shortenTitle() = this.replace(shortenTitleRegex, "").trim()
+    private fun String.looksLikeHtml() = trimStart().startsWith("<")
 
     // Dominios CDN hardcodeados como fallback si el sitio no los inyecta en el HTML
     private val fallbackImageCdnUrls = listOf("i.nhentai.net", "i3.nhentai.net")
@@ -187,7 +188,7 @@ open class NHentai(
     private fun searchMangaByIdRequest(id: String) = GET("$baseUrl/g/$id", headers)
 
     private fun searchMangaByIdParse(response: Response, id: String): MangasPage {
-        val details = mangaDetailsParse(response)
+        val details = mangaDetailsParse(response.asJsoup())
         details.url = "/g/$id/"
         return MangasPage(listOf(details), false)
     }
@@ -210,11 +211,30 @@ open class NHentai(
     override fun searchMangaNextPageSelector() = latestUpdatesNextPageSelector()
 
     override fun mangaDetailsParse(document: Document): SManga {
-        val data = document.getHentaiData()
+        val pageTitle = document.select("title").text()
+        if (pageTitle.contains("Just a moment", ignoreCase = true) ||
+            pageTitle.contains("Cloudflare", ignoreCase = true) ||
+            document.select(".cf-browser-verification, #challenge-running").isNotEmpty()
+        ) {
+            throw Exception("Protección de Cloudflare activa. Toca el ícono del mundo (WebView) arriba, resuelve el Captcha, y vuelve a intentar.")
+        }
+
+        val data = runCatching { document.getHentaiData() }.getOrNull()
         // FIX: usar fallback si getCdnUrls retorna lista vacía
         val cdnUrl = document.getCdnUrls(thumbnail = true)
             .ifEmpty { fallbackThumbCdnUrls }
             .random()
+
+        if (data == null) {
+            return document.getHentaiDataFromHtmlFallback()
+                ?: SManga.create().apply {
+                    title = pageTitle.ifBlank { "NHentai" }
+                    thumbnail_url = null
+                    status = SManga.COMPLETED
+                    description = if (pageTitle.isBlank()) null else pageTitle
+                }
+        }
+
         val resolvedTitle = when {
             displayFullTitle -> data.title.english ?: data.title.japanese ?: data.title.pretty ?: "Unknown title"
             else -> data.title.pretty ?: (data.title.english ?: data.title.japanese)?.shortenTitle() ?: "Unknown title"
@@ -321,7 +341,22 @@ open class NHentai(
         val encodedData = dataRegex.find(script)?.groupValues?.getOrNull(2)
             ?: return getHentaiDataFromSvelteScript()
                 ?: error("No se pudo extraer el JSON de la galería. El sitio puede haber cambiado o hay un bloqueo de red.")
-        return encodedData.parseAs()
+
+        val normalizedData = encodedData
+            .replace(Regex("\\\\u003c", RegexOption.IGNORE_CASE), "<")
+            .replace(Regex("\\\\u003e", RegexOption.IGNORE_CASE), ">")
+            .replace(Regex("\\\\u0026", RegexOption.IGNORE_CASE), "&")
+
+        if (normalizedData.looksLikeHtml() || normalizedData.contains("doctype html", ignoreCase = true)) {
+            return getHentaiDataFromSvelteScript()
+                ?: error("La respuesta de la galería parece ser HTML en lugar de JSON. Intenta abrir en WebView para resolver posible bloqueo o CAPTCHA.")
+        }
+
+        return runCatching { normalizedData.parseAs<Hentai>() }
+            .getOrElse {
+                getHentaiDataFromSvelteScript()
+                    ?: throw it
+            }
     }
 
     private fun Document.getHentaiDataFromSvelteScript(): Hentai? {
@@ -335,7 +370,44 @@ open class NHentai(
             ?: wrappers.firstOrNull { it.status in 200..299 }?.body
             ?: return null
 
+        if (body.looksLikeHtml()) return null
+
         return runCatching { body.parseAs<Hentai>() }.getOrNull()
+    }
+
+    private fun Document.getHentaiDataFromHtmlFallback(): SManga? {
+        val titleText = selectFirst("#info h1 .pretty, #info h1 .english, #info h1 .japanese")?.text()
+            ?: selectFirst("meta[property=og:title]")?.attr("content")?.takeIf { it.isNotBlank() }
+            ?: selectFirst("h1")?.text()?.takeIf { it.isNotBlank() }
+            ?: return null
+
+        val artists = select("a[href^=/artist/]").eachText().joinToString(", ").takeIf(String::isNotBlank)
+        val groups = select("a[href^=/group/]").eachText().joinToString(", ").takeIf(String::isNotBlank)
+        val tags = select("a[href^=/tag/]").eachText().joinToString(", ").takeIf(String::isNotBlank)
+        val categories = select("a[href^=/category/]").eachText().joinToString(", ").takeIf(String::isNotBlank)
+        val parodies = select("a[href^=/parody/]").eachText().joinToString(", ").takeIf(String::isNotBlank)
+        val characters = select("a[href^=/character/]").eachText().joinToString(", ").takeIf(String::isNotBlank)
+        val pagesCount = select("div.tag-container:containsOwn(Pages:)").text().substringAfter("Pages:").trim().ifBlank { null }
+
+        val thumbnail = selectFirst("#cover img")?.let { img ->
+            if (img.hasAttr("data-src")) img.attr("abs:data-src") else img.attr("abs:src")
+        } ?: selectFirst("meta[property=og:image]")?.attr("content")?.takeIf { it.isNotBlank() }
+
+        return SManga.create().apply {
+            title = titleText
+            thumbnail_url = thumbnail
+            status = SManga.COMPLETED
+            artist = artists.orEmpty()
+            author = groups ?: artists.orEmpty()
+            genre = tags.orEmpty()
+            description = buildString {
+                categories?.let { append("Categories: ", it, "\n") }
+                parodies?.let { append("Parodies: ", it, "\n") }
+                characters?.let { append("Characters: ", it, "\n") }
+                pagesCount?.let { append("Pages: ", it, "\n") }
+            }.ifBlank { null }
+            update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
+        }
     }
 
     private fun Hentai.getPageExtensions(): List<String> {
@@ -431,9 +503,11 @@ open class NHentai(
         val data = Regex("""\\u([0-9A-Fa-f]{4})""").replace(this) {
             it.groupValues[1].toInt(16).toChar().toString()
         }
-        return json.decodeFromString(
-            data,
-        )
+        if (data.trimStart().startsWith("<") || data.contains("<!doctype", ignoreCase = true)) {
+            throw IllegalArgumentException("Input looks like HTML, not JSON")
+        }
+
+        return json.decodeFromString(data)
     }
     private open class UriPartFilter(displayName: String, val vals: Array<Pair<String, String>>) :
         Filter.Select<String>(displayName, vals.map { it.first }.toTypedArray()) {

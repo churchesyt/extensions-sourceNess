@@ -11,11 +11,15 @@ import uy.kohesive.injekt.injectLazy
 
 val jsonInstance: Json by injectLazy()
 
+fun String.looksLikeHtml() = trimStart().startsWith("<") || contains("<!doctype", ignoreCase = true)
+
 /**
  * Parses JSON string into an object of type [T].
  */
-inline fun <reified T> String.parseAs(json: Json = jsonInstance): T =
-    json.decodeFromString(this)
+inline fun <reified T> String.parseAs(json: Json = jsonInstance): T {
+    if (looksLikeHtml()) throw IllegalArgumentException("Input looks like HTML, not JSON")
+    return json.decodeFromString(this)
+}
 
 /**
  * Parses JSON string into an object of type [T], applying a [transform] function to the string before parsing.
@@ -30,7 +34,11 @@ inline fun <reified T> String.parseAs(json: Json = jsonInstance, transform: (Str
  * Parses the response body into an object of type [T].
  */
 inline fun <reified T> Response.parseAs(json: Json = jsonInstance): T =
-    use { json.decodeFromStream(body.byteStream()) }
+    use {
+        val s = body.string()
+        if (s.looksLikeHtml()) throw IllegalArgumentException("Response body looks like HTML, not JSON")
+        json.decodeFromString(s)
+    }
 
 /**
  * Parses the response body into an object of type [T], applying a transformation to the raw JSON string before parsing.
@@ -39,7 +47,7 @@ inline fun <reified T> Response.parseAs(json: Json = jsonInstance): T =
  * @param transform A function to transform the JSON string before it's decoded.
  */
 inline fun <reified T> Response.parseAs(json: Json = jsonInstance, transform: (String) -> String): T =
-    body.string().parseAs(json, transform)
+    body.string().let { if (it.looksLikeHtml()) throw IllegalArgumentException("Response body looks like HTML, not JSON") else it }.parseAs(json, transform)
 
 /**
  * Parses a [JsonElement] into an object of type [T].

@@ -43,21 +43,23 @@ class TMOHentai : ConfigurableSource, ParsedHttpSource() {
 
     private val preferences: SharedPreferences by getPreferencesLazy()
 
-    override fun popularMangaRequest(page: Int) = GET(baseUrl, headers)
+    override fun popularMangaRequest(page: Int) = GET("$baseUrl/biblioteca?order_by=views&order_dir=desc&page=$page", headers)
 
-    override fun popularMangaSelector() = "#top_today .work-thumbnail"
+    override fun popularMangaSelector() = ".work-thumbnail"
 
     override fun popularMangaFromElement(element: Element) = SManga.create().apply {
-        val titleLink = element.selectFirst("div.content-title a[href*='/library/']")
+        val titleLink = element.selectFirst("div.content-title a[href*='/library/'], div.content-title a[href*='/view_uploads/']")
+            ?: element.selectFirst("a[href*='/library/'], a[href*='/view_uploads/']")
 
         title = if (titleLink != null) {
             titleLink.attr("title").ifBlank { titleLink.text().trim() }.ifBlank { "TMOHentai" }
         } else {
-            element.text().ifBlank { "TMOHentai" }
+            element.selectFirst(".content-title")?.text()?.trim() ?: element.text().trim().ifBlank { "TMOHentai" }
         }
 
         thumbnail_url = element.selectFirst("img.content-thumbnail-cover")?.attr("abs:src")
             ?: titleLink?.selectFirst("img")?.attr("abs:src")
+            ?: element.selectFirst("img")?.attr("abs:src")
             ?: "https://via.placeholder.com/150"
 
         if (titleLink != null) {
@@ -69,15 +71,15 @@ class TMOHentai : ConfigurableSource, ParsedHttpSource() {
         update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
     }
 
-    override fun popularMangaNextPageSelector(): String? = null
+    override fun popularMangaNextPageSelector() = "a[rel=next]"
 
-    override fun latestUpdatesRequest(page: Int) = GET(baseUrl, headers)
+    override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/biblioteca?order_by=publication_date&order_dir=desc&page=$page", headers)
 
-    override fun latestUpdatesSelector() = "#top_weekly .work-thumbnail"
+    override fun latestUpdatesSelector() = ".work-thumbnail"
 
     override fun latestUpdatesFromElement(element: Element) = popularMangaFromElement(element)
 
-    override fun latestUpdatesNextPageSelector(): String? = null
+    override fun latestUpdatesNextPageSelector() = "a[rel=next]"
 
     override fun mangaDetailsParse(document: Document) = SManga.create().apply {
         title = (
@@ -171,21 +173,38 @@ class TMOHentai : ConfigurableSource, ParsedHttpSource() {
     }
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        val url = baseUrl.toHttpUrl().newBuilder()
+        val url = "$baseUrl/biblioteca".toHttpUrl().newBuilder()
 
-        url.addQueryParameter("title", query)
+        if (query.isNotBlank()) {
+            url.addQueryParameter("title", query)
+            url.addQueryParameter("search[searchText]", query)
+            url.addQueryParameter("search[searchBy]", "title")
+        }
+
+        url.addQueryParameter("page", page.toString())
 
         (if (filters.isEmpty()) getFilterList() else filters).forEach { filter ->
             when (filter) {
                 is Types -> {
-                    if (filter.toUriPart().isNotEmpty()) {
-                        url.addQueryParameter("content", filter.toUriPart())
+                    val part = filter.toUriPart()
+                    if (part.isNotEmpty() && part != "all") {
+                        url.addQueryParameter("type", part)
+                        url.addQueryParameter("content", part)
                     }
                 }
                 is GenreList -> {
                     filter.state
-                        .filter { genre -> genre.state }
-                        .forEach { genre -> url.addQueryParameter("tags[]", genre.id) }
+                        .filter { it.state }
+                        .forEach { url.addQueryParameter("tag[]", it.id) }
+                }
+                is FilterBy -> {
+                    url.addQueryParameter("search_by", filter.toUriPart())
+                }
+                is SortBy -> {
+                    if (filter.state != null) {
+                        url.addQueryParameter("order_by", SORTABLES[filter.state!!.index].second)
+                        url.addQueryParameter("order_dir", if (filter.state!!.ascending) "asc" else "desc")
+                    }
                 }
                 else -> {}
             }
@@ -194,11 +213,11 @@ class TMOHentai : ConfigurableSource, ParsedHttpSource() {
         return GET(url.build(), headers)
     }
 
-    override fun searchMangaSelector() = popularMangaSelector()
+    override fun searchMangaSelector() = ".work-thumbnail"
 
     override fun searchMangaFromElement(element: Element) = popularMangaFromElement(element)
 
-    override fun searchMangaNextPageSelector(): String? = popularMangaNextPageSelector()
+    override fun searchMangaNextPageSelector() = "a[rel=next]"
 
     private fun searchMangaByIdRequest(id: String) = GET("$baseUrl/view_uploads/$id", headers)
 
@@ -271,7 +290,7 @@ class TMOHentai : ConfigurableSource, ParsedHttpSource() {
     private class FilterBy : UriPartFilter(
         "Campo de orden",
         arrayOf(
-            Pair("Nombre", "name"),
+            Pair("Nombre", "title"),
             Pair("Artista", "artist"),
             Pair("Revista", "magazine"),
             Pair("Tag", "tag"),
@@ -391,9 +410,9 @@ class TMOHentai : ConfigurableSource, ParsedHttpSource() {
         const val PREFIX_ID_SEARCH = "id:"
 
         private val SORTABLES = listOf(
-            Pair("Alfabético", "alphabetic"),
+            Pair("Alfabético", "title"),
             Pair("Creación", "publication_date"),
-            Pair("Popularidad", "popularity"),
+            Pair("Popularidad", "views"),
         )
     }
 }
