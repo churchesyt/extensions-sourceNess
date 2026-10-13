@@ -74,7 +74,11 @@ def get_module_list(ref: str) -> tuple[list[str], list[str]]:
         with Path(".github/always_build.json").open() as always_build_file:
             always_build = json.load(always_build_file)
         for extension in always_build:
-            modules.add(":src:" + extension.replace(".", ":"))
+            parts = extension.split(".")
+            if len(parts) != 2 or not Path("src", *parts).is_dir():
+                print(f"Skipping always-build extension without a source directory: {extension}")
+                continue
+            modules.add(":src:" + ":".join(parts))
             deleted.add(extension)
 
     if core_files_changed:
