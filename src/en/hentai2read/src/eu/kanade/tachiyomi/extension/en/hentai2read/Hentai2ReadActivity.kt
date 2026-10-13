@@ -14,13 +14,20 @@ import kotlin.system.exitProcess
 class Hentai2ReadActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val pathSegments = intent?.data?.pathSegments
-        if (pathSegments != null) {
-            // TODO: filter standard paths
-            val id = pathSegments[0]
+        val pathSegments = intent?.data?.pathSegments.orEmpty()
+        val type = pathSegments.firstOrNull()?.takeIf { it in setOf("doujinshi", "original", "imageset") }
+        val idSegment = when {
+            type != null -> pathSegments.getOrNull(1)
+            pathSegments.firstOrNull() == "reader" -> pathSegments.getOrNull(1)
+            else -> pathSegments.firstOrNull()
+        }
+        val id = idSegment?.substringBefore('-')?.takeIf { it.toLongOrNull() != null }
+
+        if (id != null) {
             val mainIntent = Intent().apply {
                 action = "eu.kanade.tachiyomi.SEARCH"
-                putExtra("query", "${Hentai2Read.PREFIX_ID_SEARCH}$id")
+                val typePrefix = type?.let { "$it:" }.orEmpty()
+                putExtra("query", "${Hentai2Read.PREFIX_ID_SEARCH}$typePrefix$id")
                 putExtra("filter", packageName)
             }
 

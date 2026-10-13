@@ -1,7 +1,6 @@
 package eu.kanade.tachiyomi.extension.en.hentai2read
 
 import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.asObservableSuccess
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -10,15 +9,13 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
-import eu.kanade.tachiyomi.util.asJsoup
-import okhttp3.FormBody
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import rx.Observable
-import java.util.Calendar
 import java.util.regex.Pattern
 
 class Hentai2Read : ParsedHttpSource() {
@@ -34,116 +31,86 @@ class Hentai2Read : ParsedHttpSource() {
     override val client: OkHttpClient = network.cloudflareClient
 
     companion object {
-        const val imageBaseUrl = "https://static.hentaicdn.com/hentai"
-
         const val PREFIX_ID_SEARCH = "id:"
 
         val pagesUrlPattern by lazy {
-            Pattern.compile("""'images' : \[\"(.*?)[,]?\"\]""")
+            Pattern.compile(""""images"\s*:\s*\[(.*?)\]""")
         }
 
-        lateinit var nextSearchPage: String
+        val imageUrlPattern by lazy {
+            Pattern.compile(""""(https?://[^"]+)"""")
+        }
     }
 
-    override fun popularMangaSelector() = "div.book-grid-item"
+    override fun popularMangaSelector() =
+        "main a.block[href^='/original/'], main a.block[href^='/doujinshi/'], main a.block[href^='/imageset/']"
 
     override fun latestUpdatesSelector() = popularMangaSelector()
 
-    override fun popularMangaRequest(page: Int) =
-        GET("$baseUrl/hentai-list/all/any/all/most-popular/$page/", headers)
+    override fun popularMangaRequest(page: Int): Request {
+        val url = "$baseUrl/ranking".toHttpUrl().newBuilder()
+            .addQueryParameter("period", "all")
+        if (page > 1) {
+            url.addQueryParameter("page", page.toString())
+        }
+        return GET(url.build(), headers)
+    }
 
     override fun latestUpdatesRequest(page: Int) =
-        GET("$baseUrl/hentai-list/all/any/all/last-updated/$page/", headers)
+        GET(if (page == 1) "$baseUrl/browse" else "$baseUrl/browse/page-$page", headers)
 
     override fun popularMangaFromElement(element: Element): SManga {
         return SManga.create().apply {
             thumbnail_url = element.select("img").attr("abs:src")
-            element.select("div.overlay-title a").let {
-                title = it.text()
-                setUrlWithoutDomain(it.attr("href"))
-            }
+            title = element.select("img").attr("alt").ifBlank { element.text() }
+            setUrlWithoutDomain(element.attr("href"))
         }
     }
 
     override fun latestUpdatesFromElement(element: Element): SManga = popularMangaFromElement(element)
 
-    override fun popularMangaNextPageSelector() = "a#js-linkNext"
+    override fun popularMangaNextPageSelector() = "a[aria-label='Next page']"
 
     override fun latestUpdatesNextPageSelector() = popularMangaNextPageSelector()
 
     override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> {
         return if (query.startsWith(PREFIX_ID_SEARCH)) {
-            val id = query.removePrefix(PREFIX_ID_SEARCH)
-            client.newCall(GET("$baseUrl/$id/", headers)).asObservableSuccess()
-                .map { MangasPage(listOf(mangaDetailsParse(it).apply { url = "/$id/" }), false) }
-        } else {
-            val search = requestSearch(page, query, filters)
-            client.newCall(search.first).asObservableSuccess()
-                .map { parseSearch(it, page, search.second) }
-        }
-    }
+            val idQuery = query.removePrefix(PREFIX_ID_SEARCH).split(':', limit = 2)
+            val type = idQuery.getOrNull(0)?.takeIf { it in setOf("doujinshi", "original", "imageset") }
+            val id = if (type == null) idQuery[0] else idQuery[1]
+            val mangaType = type ?: "doujinshi"
 
-    private fun requestSearch(page: Int, query: String, filters: FilterList): Pair<Request, String?> {
-        val searchUrl = "$baseUrl/hentai-list/advanced-search"
-        var sortOrder: String? = null
-
-        return if (page == 1) {
-            val form = FormBody.Builder().apply {
-                add("cmd_wpm_wgt_mng_sch_sbm", "Search")
-                add("txt_wpm_wgt_mng_sch_nme", "")
-                add("cmd_wpm_pag_mng_sch_sbm", "")
-                add("txt_wpm_pag_mng_sch_nme", query)
-
-                for (filter in if (filters.isEmpty()) getFilterList() else filters) {
-                    when (filter) {
-                        is MangaNameSelect -> add("cbo_wpm_pag_mng_sch_nme", filter.state.toString())
-                        is ArtistName -> add("txt_wpm_pag_mng_sch_ats", filter.state)
-                        is ArtistNameSelect -> add("cbo_wpm_pag_mng_sch_ats", filter.state.toString())
-                        is CharacterName -> add("txt_wpm_pag_mng_sch_chr", filter.state)
-                        is CharacterNameSelect -> add("cbo_wpm_pag_mng_sch_chr", filter.state.toString())
-                        is ReleaseYear -> add("txt_wpm_pag_mng_sch_rls_yer", filter.state)
-                        is ReleaseYearSelect -> add("cbo_wpm_pag_mng_sch_rls_yer", filter.state.toString())
-                        is Status -> add("rad_wpm_pag_mng_sch_sts", filter.state.toString())
-                        is TagSearchMode -> add("rad_wpm_pag_mng_sch_tag_mde", arrayOf("and", "or").getOrElse(filter.state) { "and" })
-                        is TagList -> filter.state.forEach { tag ->
-                            when (tag.state) {
-                                Filter.TriState.STATE_INCLUDE -> add("chk_wpm_pag_mng_sch_mng_tag_inc[]", tag.id.toString())
-                                Filter.TriState.STATE_EXCLUDE -> add("chk_wpm_pag_mng_sch_mng_tag_exc[]", tag.id.toString())
-                            }
-                        }
-                        is SortOrder -> sortOrder = filter.toUriPart()
-                        else -> {}
+            if (id.toLongOrNull() == null) {
+                Observable.error(IllegalArgumentException("Invalid Hentai2Read manga ID: $id"))
+            } else {
+                client.newCall(GET("$baseUrl/$mangaType/$id", headers)).asObservableSuccess()
+                    .map { response ->
+                        MangasPage(
+                            listOf(mangaDetailsParse(response).apply { url = response.request.url.encodedPath }),
+                            false,
+                        )
                     }
-                }
             }
-            Pair(POST(searchUrl, headers, form.build()), sortOrder)
         } else {
-            Pair(GET(nextSearchPage, headers), sortOrder)
+            super.fetchSearchManga(page, query, filters)
         }
     }
 
-    // If the user wants to search by a sort order other than alphabetical, we have to make another call
-    private fun parseSearch(response: Response, page: Int, sortOrder: String?): MangasPage {
-        val document = if (page == 1 && sortOrder != null) {
-            response.asJsoup().select("li.dropdown li:contains($sortOrder) a").first()!!.attr("abs:href")
-                .let { client.newCall(GET(it, headers)).execute().asJsoup() }
-        } else {
-            response.asJsoup()
+    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
+        val url = "$baseUrl/search".toHttpUrl().newBuilder()
+            .addQueryParameter("q", query)
+            .addQueryParameter("page", page.toString())
+
+        filters.forEach { filter ->
+            when (filter) {
+                is TypeFilter -> filter.toUriPart()?.let { url.addQueryParameter("type", it) }
+                is SortOrder -> filter.toUriPart()?.let { url.addQueryParameter("sort", it) }
+                else -> Unit
+            }
         }
 
-        val mangas = document.select(searchMangaSelector()).map { element ->
-            searchMangaFromElement(element)
-        }
-
-        val hasNextPage = document.select(searchMangaNextPageSelector()).firstOrNull()?.let {
-            nextSearchPage = it.attr("abs:href")
-            true
-        } ?: false
-
-        return MangasPage(mangas, hasNextPage)
+        return GET(url.build(), headers)
     }
-
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = throw UnsupportedOperationException()
 
     override fun searchMangaSelector() = popularMangaSelector()
 
@@ -154,48 +121,20 @@ class Hentai2Read : ParsedHttpSource() {
     override fun searchMangaNextPageSelector() = popularMangaNextPageSelector()
 
     override fun mangaDetailsParse(document: Document): SManga {
-        val infoElement = document.select("ul.list-simple-mini").first()!!
+        fun detailValue(label: String): String =
+            document.select("main dt").firstOrNull { it.text().equals(label, ignoreCase = true) }
+                ?.nextElementSibling()?.text().orEmpty()
 
-        val manga = SManga.create()
-        manga.author = infoElement.select("li:contains(Author) > a").text()
-        manga.artist = infoElement.select("li:contains(Artist) > a").text()
-        manga.genre = infoElement.select("li:contains(Category) > a, li:contains(Content) > a").joinToString(", ") { it.text() }
-        manga.description = buildDescription(infoElement)
-        manga.status = infoElement.select("li:contains(Status) > a").text().orEmpty().let { parseStatus(it) }
-        manga.thumbnail_url = document.select("a#js-linkNext img").attr("src")
-        manga.title = document.select("h3.block-title > a").first()!!.ownText().trim()
-        return manga
-    }
-
-    private fun buildDescription(infoElement: Element): String {
-        val topDescriptions = listOf(
-            Pair(
-                "Alternative Title",
-                infoElement.select("li").first()!!.text().let {
-                    if (it.trim() == "-") {
-                        emptyList()
-                    } else {
-                        it.split(", ")
-                    }
-                },
-            ),
-            Pair(
-                "Storyline",
-                listOf(infoElement.select("li:contains(Storyline) > p").text()),
-            ),
-        )
-
-        val descriptions = listOf(
-            "Parody",
-            "Page",
-            "Character",
-            "Language",
-        ).map { it to infoElement.select("li:contains($it) a").map { v -> v.text() } }
-            .let { topDescriptions + it } // start with topDescriptions
-            .filter { !it.second.isEmpty() && it.second[0] != "-" }
-            .map { "${it.first}:\n${it.second.joinToString()}" }
-
-        return descriptions.joinToString("\n\n")
+        return SManga.create().apply {
+            title = document.selectFirst("main h1")?.text().orEmpty()
+            author = detailValue("Author")
+            artist = detailValue("Artist")
+            genre = document.select("main a[href^='/category/'], main a[href^='/content/']")
+                .joinToString(", ") { it.text() }
+            description = document.selectFirst("meta[name=description]")?.attr("content").orEmpty()
+            status = parseStatus(detailValue("Status"))
+            thumbnail_url = document.selectFirst("meta[property=og:image]")?.attr("content").orEmpty()
+        }
     }
 
     private fun parseStatus(status: String) = when {
@@ -204,59 +143,32 @@ class Hentai2Read : ParsedHttpSource() {
         else -> SManga.UNKNOWN
     }
 
-    override fun chapterListSelector() = "ul.nav-chapters > li > div.media > a"
+    override fun chapterListSelector() = "li[id^=chapter-] a[href*='/reader/'][href$='/page-1']"
 
     override fun chapterFromElement(element: Element): SChapter {
         return SChapter.create().apply {
             setUrlWithoutDomain(element.attr("href"))
-            val time = element.select("div > small").text().substringAfter("about").substringBefore("ago")
-            name = element.ownText().trim()
-            if (time != "") {
-                date_upload = parseChapterDate(time)
-            }
-        }
-    }
-
-    private fun parseChapterDate(date: String): Long {
-        val value = date.replace(Regex("[^\\d]"), "").toInt()
-
-        return when {
-            "second" in date -> Calendar.getInstance().apply {
-                add(Calendar.SECOND, -value)
-            }.timeInMillis
-            "minute" in date -> Calendar.getInstance().apply {
-                add(Calendar.MINUTE, -value)
-            }.timeInMillis
-            "hour" in date -> Calendar.getInstance().apply {
-                add(Calendar.HOUR_OF_DAY, -value)
-            }.timeInMillis
-            "day" in date -> Calendar.getInstance().apply {
-                add(Calendar.DATE, -value)
-            }.timeInMillis
-            "week" in date -> Calendar.getInstance().apply {
-                add(Calendar.DATE, -value * 7)
-            }.timeInMillis
-            "month" in date -> Calendar.getInstance().apply {
-                add(Calendar.MONTH, -value)
-            }.timeInMillis
-            "year" in date -> Calendar.getInstance().apply {
-                add(Calendar.YEAR, -value)
-            }.timeInMillis
-            else -> {
-                return 0
-            }
+            name = element.text().trim()
         }
     }
 
     override fun pageListParse(response: Response): List<Page> {
-        val pages = mutableListOf<Page>()
-        val m = pagesUrlPattern.matcher(response.body.string())
-        var i = 0
-        while (m.find()) {
-            m.group(1)?.split(",")?.forEach {
-                pages.add(Page(i++, "", imageBaseUrl + it.trim('"').replace("""\/""", "/")))
-            }
+        val body = response.body.string().replace("\\/", "/")
+        val imageList = pagesUrlPattern.matcher(body)
+        if (!imageList.find()) {
+            throw IllegalStateException("Could not find reader image list")
         }
+
+        val pages = mutableListOf<Page>()
+        val images = imageUrlPattern.matcher(imageList.group(1).orEmpty())
+        while (images.find()) {
+            pages.add(Page(pages.size, "", images.group(1)))
+        }
+
+        if (pages.isEmpty()) {
+            throw IllegalStateException("Reader image list was empty")
+        }
+
         return pages
     }
 
@@ -264,51 +176,37 @@ class Hentai2Read : ParsedHttpSource() {
 
     override fun imageUrlParse(document: Document) = throw UnsupportedOperationException()
 
-    private class MangaNameSelect : Filter.Select<String>("Manga Name", arrayOf("Contains", "Starts With", "Ends With"))
-    private class ArtistName : Filter.Text("Artist")
-    private class ArtistNameSelect : Filter.Select<String>("Artist Name", arrayOf("Contains", "Starts With", "Ends With"))
-    private class CharacterName : Filter.Text("Character")
-    private class CharacterNameSelect : Filter.Select<String>("Character Name", arrayOf("Contains", "Starts With", "Ends With"))
-    private class ReleaseYear : Filter.Text("Release Year")
-    private class ReleaseYearSelect : Filter.Select<String>("Release Year", arrayOf("In", "Before", "After"))
-    private class Status : Filter.Select<String>("Status", arrayOf("Any", "Completed", "Ongoing"))
-    private class TagSearchMode : Filter.Select<String>("Tag Search Mode", arrayOf("AND", "OR"))
+    private class TypeFilter : UriPartFilter(
+        "Type",
+        arrayOf(
+            Pair("Any", null),
+            Pair("Original", "original"),
+            Pair("Doujinshi", "doujinshi"),
+            Pair("Image sets", "imageset"),
+            Pair("Videos", "video"),
+        ),
+    )
+
     private class Tag(name: String, val id: Int) : Filter.TriState(name)
     private class TagList(title: String, tags: List<Tag>) : Filter.Group<Tag>(title, tags)
-    private class SortOrder(values: Array<Pair<String, String?>>) : UriPartFilter("Order", values)
+    private class SortOrder(values: Array<Pair<String, String?>>) : UriPartFilter("Sort", values)
     private open class UriPartFilter(displayName: String, val vals: Array<Pair<String, String?>>) :
         Filter.Select<String>(displayName, vals.map { it.first }.toTypedArray()) {
         fun toUriPart() = vals.getOrNull(state)?.second
     }
 
     override fun getFilterList() = FilterList(
+        TypeFilter(),
         SortOrder(getSortOrder()),
-        MangaNameSelect(),
-        Filter.Separator(),
-        ArtistName(),
-        ArtistNameSelect(),
-        Filter.Separator(),
-        CharacterName(),
-        CharacterNameSelect(),
-        Filter.Separator(),
-        ReleaseYear(),
-        ReleaseYearSelect(),
-        Filter.Separator(),
-        Status(),
-        Filter.Separator(),
-        TagSearchMode(),
-        Filter.Separator(),
-        TagList("Categories", getCategoryList()),
-        Filter.Separator(),
-        TagList("Tags", getTagList()),
-        Filter.Separator(),
-        TagList("Doujins", getDoujinList()),
     )
 
     private fun getSortOrder() = arrayOf(
-        Pair("Alphabetical", null),
-        Pair("Most Popular", "most popular"),
-        Pair("Last Updated", "last updated"),
+        Pair("Best match", null),
+        Pair("Newest", "newest"),
+        Pair("Recently updated", "latest"),
+        Pair("Most read", "most-viewed"),
+        Pair("Highest rated", "top-rated"),
+        Pair("A to Z", "alphabetical"),
     )
 
     // Categories : 27
