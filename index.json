@@ -2318,195 +2318,169 @@
     ]
   },
   {
-    "name": "Tachiyomi: Hitomi(Ness)",
+    "name": "Tachiyomi: Hitomi",
     "pkg": "eu.kanade.tachiyomi.extension.all.hitomi",
-    "apk": "tachiyomi-all.hitomi-v1.4.41.apk",
+    "apk": "tachiyomi-all.hitomi-v1.6.41.apk",
     "lang": "all",
-    "code": 41,
-    "version": "1.4.41",
+    "code": 106041,
+    "version": "1.6.41",
     "nsfw": 1,
     "sources": [
       {
         "name": "Hitomi",
         "lang": "all",
         "id": "690123758188633713",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "en",
         "id": "8758194323514078879",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "id",
         "id": "1151065481637272954",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "jv",
         "id": "6508906416202704914",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "ca",
         "id": "6511868096744396893",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "ceb",
         "id": "4174246577531268343",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "cs",
         "id": "6252839110189358321",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "da",
         "id": "846229581721942637",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "de",
         "id": "3527959698638681794",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "et",
         "id": "3137387913459348191",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "es",
         "id": "4675241818028365305",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "eo",
         "id": "2806629479137588090",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "fr",
         "id": "2485667029890093714",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "it",
         "id": "6889006204051558344",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "hi",
         "id": "1934919967422980093",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "hu",
         "id": "5925216506653833737",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "pl",
         "id": "721961972020678864",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "pt",
         "id": "5342308195627947507",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "vi",
         "id": "3818599797217502124",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "tr",
         "id": "5379755699214980223",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "ru",
         "id": "3909280091773603050",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "uk",
         "id": "4074034220834832549",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "ar",
         "id": "6776904750010591906",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "ko",
         "id": "9053782715781498920",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "zh",
         "id": "1859528116737393976",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       },
       {
         "name": "Hitomi",
         "lang": "ja",
         "id": "7152495211541141858",
-        "baseUrl": "https://hitomi.la",
-        "versionId": 1
+        "baseUrl": "https://hitomi.la"
       }
     ]
   },
@@ -5778,41 +5752,37 @@
     ]
   },
   {
-    "name": "Tachiyomi: NHentai(Ness)",
+    "name": "Tachiyomi: NHentai",
     "pkg": "eu.kanade.tachiyomi.extension.all.nhentai",
-    "apk": "tachiyomi-all.nhentai-v1.4.58.apk",
+    "apk": "tachiyomi-all.nhentai-v1.6.58.apk",
     "lang": "all",
-    "code": 58,
-    "version": "1.4.58",
+    "code": 106058,
+    "version": "1.6.58",
     "nsfw": 1,
     "sources": [
       {
         "name": "NHentai",
         "lang": "en",
         "id": "3122156392225024195",
-        "baseUrl": "https://nhentai.net",
-        "versionId": 1
+        "baseUrl": "https://nhentai.net"
       },
       {
         "name": "NHentai",
         "lang": "ja",
         "id": "4726175775739752699",
-        "baseUrl": "https://nhentai.net",
-        "versionId": 1
+        "baseUrl": "https://nhentai.net"
       },
       {
         "name": "NHentai",
         "lang": "zh",
         "id": "2203215402871965477",
-        "baseUrl": "https://nhentai.net",
-        "versionId": 1
+        "baseUrl": "https://nhentai.net"
       },
       {
         "name": "NHentai",
         "lang": "all",
         "id": "7309872737163460316",
-        "baseUrl": "https://nhentai.net",
-        "versionId": 1
+        "baseUrl": "https://nhentai.net"
       }
     ]
   },
@@ -6449,34 +6419,31 @@
     ]
   },
   {
-    "name": "Tachiyomi: Pururin(Ness)",
+    "name": "Tachiyomi: Pururin",
     "pkg": "eu.kanade.tachiyomi.extension.all.pururin",
-    "apk": "tachiyomi-all.pururin-v1.4.11.apk",
+    "apk": "tachiyomi-all.pururin-v1.6.11.apk",
     "lang": "all",
-    "code": 11,
-    "version": "1.4.11",
+    "code": 106011,
+    "version": "1.6.11",
     "nsfw": 1,
     "sources": [
       {
         "name": "Pururin",
         "lang": "all",
         "id": "4326152278746463981",
-        "baseUrl": "https://pururin.me",
-        "versionId": 1
+        "baseUrl": "https://pururin.me"
       },
       {
         "name": "Pururin",
         "lang": "en",
         "id": "2221515250486218861",
-        "baseUrl": "https://pururin.me",
-        "versionId": 1
+        "baseUrl": "https://pururin.me"
       },
       {
         "name": "Pururin",
         "lang": "ja",
         "id": "995946880114959182",
-        "baseUrl": "https://pururin.me",
-        "versionId": 1
+        "baseUrl": "https://pururin.me"
       }
     ]
   },
@@ -10676,38 +10643,36 @@
     ]
   },
   {
-    "name": "Tachiyomi: Hentai20(Ness)",
+    "name": "Tachiyomi: Hentai20",
     "pkg": "eu.kanade.tachiyomi.extension.en.hentai20",
-    "apk": "tachiyomi-en.hentai20-v1.4.39.apk",
+    "apk": "tachiyomi-en.hentai20-v1.6.9.apk",
     "lang": "en",
-    "code": 39,
-    "version": "1.4.39",
+    "code": 106009,
+    "version": "1.6.9",
     "nsfw": 1,
     "sources": [
       {
         "name": "Hentai20",
         "lang": "en",
         "id": "7114409483685920616",
-        "baseUrl": "https://hentai20.io",
-        "versionId": 1
+        "baseUrl": "https://hentai20.io"
       }
     ]
   },
   {
-    "name": "Tachiyomi: Hentai2Read(Ness)",
+    "name": "Tachiyomi: Hentai2Read",
     "pkg": "eu.kanade.tachiyomi.extension.en.hentai2read",
-    "apk": "tachiyomi-en.hentai2read-v1.4.19.apk",
+    "apk": "tachiyomi-en.hentai2read-v1.6.19.apk",
     "lang": "en",
-    "code": 19,
-    "version": "1.4.19",
+    "code": 106019,
+    "version": "1.6.19",
     "nsfw": 1,
     "sources": [
       {
         "name": "Hentai2Read",
         "lang": "en",
         "id": "8314925449740051373",
-        "baseUrl": "https://hentai2read.com",
-        "versionId": 1
+        "baseUrl": "https://hentai2read.com"
       }
     ]
   },
@@ -18621,20 +18586,19 @@
     ]
   },
   {
-    "name": "Tachiyomi: TMOHentaiApp(Ness)",
+    "name": "Tachiyomi: TMOHentaiApp",
     "pkg": "eu.kanade.tachiyomi.extension.es.tmohentai",
-    "apk": "tachiyomi-es.tmohentai-v1.4.20.apk",
+    "apk": "tachiyomi-es.tmohentai-v1.6.20.apk",
     "lang": "es",
-    "code": 20,
-    "version": "1.4.20",
+    "code": 106020,
+    "version": "1.6.20",
     "nsfw": 1,
     "sources": [
       {
         "name": "TMOHentai",
         "lang": "es",
         "id": "8385948079634749158",
-        "baseUrl": "https://tmohentai.app",
-        "versionId": 1
+        "baseUrl": "https://tmohentai.app"
       }
     ]
   },
