@@ -238,7 +238,8 @@ abstract class Pururin(
     }
 
     override fun chapterListParse(response: Response): List<SChapter> {
-        return response.asJsoup().select(chapterListSelector())
+        val document = response.asJsoup()
+        return document.select(chapterListSelector())
             .map { chapterFromElement(it) }
             .reversed()
             .let { list ->
@@ -246,7 +247,7 @@ abstract class Pururin(
                     listOf(
                         SChapter.create().apply {
                             setUrlWithoutDomain(response.request.url.toString())
-                            name = "Chapter"
+                            name = document.selectFirst(".box-gallery .title")?.text()?.trim().orEmpty().ifBlank { "Chapter" }
                         },
                     )
                 }

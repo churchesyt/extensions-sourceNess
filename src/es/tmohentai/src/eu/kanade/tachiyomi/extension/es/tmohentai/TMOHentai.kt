@@ -45,10 +45,15 @@ class TMOHentai : ConfigurableSource, ParsedHttpSource() {
 
     override fun popularMangaRequest(page: Int) = GET("$baseUrl/biblioteca?order_by=views&order_dir=desc&page=$page", headers)
 
-    override fun popularMangaSelector() = ".work-thumbnail"
+    override fun popularMangaSelector() = ".manga-card, .work-thumbnail"
 
     override fun popularMangaFromElement(element: Element) = SManga.create().apply {
-        val titleLink = element.selectFirst("div.content-title a[href*='/library/'], div.content-title a[href*='/view_uploads/']")
+        val elementHref = element.attr("href")
+        val titleLink = if (element.tagName() == "a" && ("/library/" in elementHref || "/view_uploads/" in elementHref)) {
+            element
+        } else {
+            element.selectFirst("div.content-title a[href*='/library/'], div.content-title a[href*='/view_uploads/']")
+        }
             ?: element.selectFirst("a[href*='/library/'], a[href*='/view_uploads/']")
 
         title = if (titleLink != null) {
@@ -213,7 +218,7 @@ class TMOHentai : ConfigurableSource, ParsedHttpSource() {
         return GET(url.build(), headers)
     }
 
-    override fun searchMangaSelector() = ".work-thumbnail"
+    override fun searchMangaSelector() = popularMangaSelector()
 
     override fun searchMangaFromElement(element: Element) = popularMangaFromElement(element)
 
