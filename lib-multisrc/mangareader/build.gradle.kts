@@ -1,5 +1,14 @@
 plugins {
-    id("lib-multisrc")
+    alias(kei.plugins.multisrc)
 }
 
-baseVersionCode = 3
+keiyoushi {
+    baseVersionCode = 4
+    libVersion = "1.6"
+
+    deeplink {
+        path("/read/..*")
+        path("/manga/..*")
+        path("/raw-manga/..*")
+    }
+}

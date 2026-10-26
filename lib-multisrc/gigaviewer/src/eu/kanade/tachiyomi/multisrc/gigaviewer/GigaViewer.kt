@@ -1,389 +1,234 @@
 package eu.kanade.tachiyomi.multisrc.gigaviewer
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Rect
-import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.network.asObservable
-import eu.kanade.tachiyomi.source.model.Filter
+import android.util.Base64
+import androidx.preference.PreferenceScreen
+import androidx.preference.SwitchPreferenceCompat
+import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.online.ParsedHttpSource
-import eu.kanade.tachiyomi.util.asJsoup
+import eu.kanade.tachiyomi.source.model.SMangaUpdate
+import keiyoushi.network.get
+import keiyoushi.network.post
+import keiyoushi.source.KeiSource
+import keiyoushi.utils.GraphQLErrorInterceptor
+import keiyoushi.utils.asJsoup
+import keiyoushi.utils.firstInstance
+import keiyoushi.utils.getPreferencesLazy
+import keiyoushi.utils.graphQLBody
 import keiyoushi.utils.parseAs
-import keiyoushi.utils.tryParse
-import kotlinx.serialization.SerializationException
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import okhttp3.Call
-import okhttp3.Headers
+import keiyoushi.utils.parseGraphQLAs
+import keiyoushi.utils.string
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.Interceptor
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.Request
-import okhttp3.Response
-import okhttp3.ResponseBody.Companion.toResponseBody
-import org.jsoup.Jsoup
-import org.jsoup.nodes.Document
-import org.jsoup.nodes.Element
-import rx.Observable
-import uy.kohesive.injekt.injectLazy
-import java.io.ByteArrayOutputStream
-import java.io.InputStream
-import java.util.Calendar
-import java.util.Locale
-import kotlin.math.floor
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.OkHttpClient
 
-abstract class GigaViewer(
-    override val name: String,
-    override val baseUrl: String,
-    override val lang: String,
-    private val cdnUrl: String = "",
-    private val isPaginated: Boolean = false,
-) : ParsedHttpSource() {
+// GigaViewer Sources: https://hatena.co.jp/solutions/gigaviewer
+abstract class GigaViewer :
+    KeiSource(),
+    ConfigurableSource {
+    protected open val apiUrl get() = "$baseUrl/graphql"
+    protected open val preferences by getPreferencesLazy()
 
-    override val supportsLatest = true
-
-    protected val dayOfWeek: String by lazy {
-        Calendar.getInstance()
-            .getDisplayName(Calendar.DAY_OF_WEEK, Calendar.LONG, Locale.US)!!
-            .lowercase(Locale.US)
+    override fun OkHttpClient.Builder.configureClient() = apply {
+        addInterceptor(ImageInterceptor())
+        addInterceptor(GraphQLErrorInterceptor())
     }
 
-    protected open val publisher: String = ""
+    /**
+     * Series lists shown in popular ordered by their likes, and in latest ordered by their newest episode.
+     *
+     * GigaViewer sites sort their series into lists called serial groups, and each entry here is the database id of one of them.
+     *
+     * To find the id of a group:
+     * 1. Open an episode of a series from that list and take the `data-giga_series` value from the document.
+     * 2. Send this query, then pick the group by its name from the response:
+     * ```
+     * curl https://<site>/graphql -H "Content-Type: application/json" -d '{"query": "{ series(databaseId: \"<data-giga_series>\") { serialGroups { databaseId name } } }"}'
+     * ```
+     *
+     * Genres can also be used:
+     * list them with `-d '{"query": "{ genres { id name } }"}'` and decode the `id` from base64, which gives `Genre:<databaseId>`.
+     */
+    protected open val seriesListIds: List<String> = emptyList()
 
-    override fun headersBuilder(): Headers.Builder = Headers.Builder()
-        .add("Origin", baseUrl)
-        .add("Referer", baseUrl)
-
-    private val json: Json by injectLazy()
-
-    override fun popularMangaRequest(page: Int): Request = GET("$baseUrl/series", headers)
-
-    override fun popularMangaSelector(): String = "ul.series-list li a"
-
-    override fun popularMangaFromElement(element: Element): SManga = SManga.create().apply {
-        title = element.selectFirst("h2.series-list-title")!!.text()
-        thumbnail_url = element.selectFirst("div.series-list-thumb img")!!
-            .attr("data-src")
-        setUrlWithoutDomain(element.attr("href"))
+    // Sites without likes shows 0 for every series, so they keep the order of their lists
+    override suspend fun getPopularManga(page: Int): MangasPage {
+        val mangas = fetchSeriesList(seriesListIds)
+            .sortedByDescending { it.likeCount }
+            .mapNotNull { it.toSManga() }
+        return MangasPage(mangas, false)
     }
 
-    override fun popularMangaNextPageSelector(): String? = null
-
-    override fun latestUpdatesRequest(page: Int): Request = popularMangaRequest(page)
-
-    override fun latestUpdatesSelector(): String = "h2.series-list-date-week.$dayOfWeek + ul.series-list li a"
-
-    override fun latestUpdatesFromElement(element: Element): SManga = popularMangaFromElement(element)
-
-    override fun latestUpdatesNextPageSelector(): String? = null
-
-    // The search returns 404 when there's no results.
-    override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> {
-        return client.newCall(searchMangaRequest(page, query, filters))
-            .asObservableIgnoreCode(404)
-            .map(::searchMangaParse)
+    override suspend fun getLatestUpdates(page: Int): MangasPage {
+        val mangas = fetchSeriesList(seriesListIds)
+            .sortedByDescending { it.latestPublishedAt }
+            .mapNotNull { it.toSManga() }
+        return MangasPage(mangas, false)
     }
 
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        if (query.isNotEmpty()) {
-            val url = "$baseUrl/search".toHttpUrl().newBuilder()
-                .addQueryParameter("q", query)
-
-            return GET(url.build(), headers)
+    override suspend fun getSearchMangaList(page: Int, query: String, filters: FilterList): MangasPage {
+        if (query.isNotBlank()) {
+            val mangas = client.post(apiUrl, body = graphQLBody(SEARCH_QUERY, variables = SearchVariables(query)))
+                .parseGraphQLAs<SearchResponse>().searchSeries.edges
+                .map { it.node }
+                .sortedBy { it.isVolumeOnly }
+                .mapNotNull { it.toSManga() }
+            return MangasPage(mangas, false)
         }
 
-        val collectionSelected = (filters[0] as CollectionFilter).selected
-        val collectionPath = if (collectionSelected.path.isBlank()) "" else "/" + collectionSelected.path
-        return GET("$baseUrl/series$collectionPath", headers)
+        val ids = filters.firstInstance<CollectionFilter>().value
+        return MangasPage(fetchCollection(ids), false)
     }
 
-    override fun searchMangaParse(response: Response): MangasPage {
-        if (response.request.url.toString().contains("search")) {
-            return super.searchMangaParse(response)
+    protected open suspend fun fetchCollection(ids: List<String>): List<SManga> = fetchSeriesList(ids).mapNotNull { it.toSManga() }
+
+    protected open suspend fun fetchSeriesList(ids: List<String>): List<SeriesListItem> {
+        val variables = ids.withIndex().associate { (i, id) ->
+            val nodeId = if (':' in id) id else "SerialGroup:$id"
+            "id$i" to Base64.encodeToString(nodeId.toByteArray(), Base64.NO_WRAP)
         }
 
-        return popularMangaParse(response)
+        return client.post(apiUrl, body = graphQLBody(seriesListQuery(variables.keys), variables = variables))
+            .parseGraphQLAs<Map<String, SeriesListNode>>()
+            .values
+            .flatMap { node -> node.series.edges.map { it.node } }
+            .distinctBy { it.databaseId }
     }
 
-    override fun searchMangaSelector() = "ul.search-series-list li, ul.series-list li"
-
-    override fun searchMangaFromElement(element: Element): SManga = SManga.create().apply {
-        title = element.selectFirst("div.title-box p.series-title")!!.text()
-        thumbnail_url = element.selectFirst("div.thmb-container a img")!!.attr("src")
-        setUrlWithoutDomain(element.selectFirst("div.thmb-container a")!!.attr("href"))
-    }
-
-    override fun searchMangaNextPageSelector(): String? = null
-
-    protected open fun mangaDetailsInfoSelector(): String = "section.series-information div.series-header"
-
-    override fun mangaDetailsParse(document: Document): SManga = SManga.create().apply {
-        val infoElement = document.selectFirst(mangaDetailsInfoSelector())!!
-
-        title = infoElement.selectFirst("h1.series-header-title")!!.text()
-        author = infoElement.selectFirst("h2.series-header-author")!!.text()
-        artist = author
-        description = infoElement.selectFirst("p.series-header-description")!!.text()
-        thumbnail_url = infoElement.selectFirst("div.series-header-image-wrapper img")!!
-            .attr("data-src")
-    }
-
-    protected fun chapterListParseSinglePage(response: Response): List<SChapter> {
-        val document = response.asJsoup()
-        val aggregateId = document.selectFirst("script.js-valve")!!.attr("data-giga_series")
-
-        val newHeaders = headers.newBuilder()
-            .set("Referer", response.request.url.toString())
-            .build()
-
-        var readMoreEndpoint = baseUrl.toHttpUrl().newBuilder()
-            .addPathSegment("api")
-            .addPathSegment("viewer")
-            .addPathSegment("readable_products")
-            .addQueryParameter("aggregate_id", aggregateId)
-            .addQueryParameter("number_since", Int.MAX_VALUE.toString())
-            .addQueryParameter("number_until", "0")
-            .addQueryParameter("read_more_num", "150")
-            .addQueryParameter("type", "episode")
-            .build()
-            .toString()
-
-        val chapters = mutableListOf<SChapter>()
-
-        var request = GET(readMoreEndpoint, newHeaders)
-        var result = client.newCall(request).execute()
-
-        while (result.code != 404) {
-            val jsonResult = json.parseToJsonElement(result.body.string()).jsonObject
-            readMoreEndpoint = jsonResult["nextUrl"]!!.jsonPrimitive.content
-            val tempDocument = Jsoup.parse(
-                jsonResult["html"]!!.jsonPrimitive.content,
-                response.request.url.toString(),
-            )
-
-            tempDocument
-                .select("ul.series-episode-list " + chapterListSelector())
-                .mapTo(chapters) { element -> chapterFromElement(element) }
-
-            request = GET(readMoreEndpoint, newHeaders)
-            result = client.newCall(request).execute()
-        }
-
-        result.close()
-
-        return chapters
-    }
-
-    protected fun paginatedChaptersRequest(referer: String, aggregateId: String, offset: Int): Response {
-        val headers = headers.newBuilder()
-            .set("Referer", referer)
-            .build()
-
-        val apiUrl = baseUrl.toHttpUrl().newBuilder()
-            .addPathSegment("api")
-            .addPathSegment("viewer")
-            .addPathSegment("pagination_readable_products")
-            .addQueryParameter("type", "episode")
-            .addQueryParameter("aggregate_id", aggregateId)
-            .addQueryParameter("sort_order", "desc")
-            .addQueryParameter("offset", offset.toString())
-            .build()
-            .toString()
-
-        val request = GET(apiUrl, headers)
-        return client.newCall(request).execute()
-    }
-
-    protected fun chapterListParsePaginated(response: Response): List<SChapter> {
-        val document = response.asJsoup()
-        val referer = response.request.url.toString()
-        val aggregateId = document.selectFirst("script.js-valve")!!.attr("data-giga_series")
-
-        val chapters = mutableListOf<SChapter>()
-
-        var offset = 0
-
-        // repeat until the offset is too large to return any chapters, resulting in an empty list
-        while (true) {
-            // make request
-            val result = paginatedChaptersRequest(referer, aggregateId, offset)
-            val resultData = result.parseAs<List<GigaViewerPaginationReadableProduct>>()
-            if (resultData.isEmpty()) {
-                break
-            }
-            resultData.mapTo(chapters) { element ->
-                element.toSChapter(chapterListMode, publisher)
-            }
-            // increase offset
-            offset += resultData.size
-        }
-
-        return chapters
-    }
-
-    override fun chapterListParse(response: Response): List<SChapter> {
-        return if (isPaginated) {
-            chapterListParsePaginated(response)
-        } else {
-            chapterListParseSinglePage(response)
+    /**
+     * Sets the url of an entry from a website list. These lists only link to an episode,
+     * but a series thumbnail has the series id at the start of its file name.
+     * Thumbnails from `cdn-scissors.gigaviewer.com` contain that url as their last path segment.
+     * Without a series thumbnail, the episode path is used instead and [fetchMangaUpdate] looks up its series.
+     */
+    protected fun SManga.setSeriesUrl(episodeUrl: String, thumbnailUrl: String?) {
+        val path = episodeUrl.toHttpUrl().encodedPath
+        val thumbnail = thumbnailUrl?.toHttpUrlOrNull()?.let { it.pathSegments.last().toHttpUrlOrNull() ?: it }
+        val seriesId = thumbnail?.pathSegments?.takeLast(2)
+            ?.takeIf { it.first().startsWith("series-") }
+            ?.last()?.substringBefore("-")
+        url = seriesId ?: path
+        memo = buildJsonObject {
+            put("path", path)
         }
     }
 
-    override fun chapterListSelector() = "li.episode"
-
-    protected open val chapterListMode = CHAPTER_LIST_PAID
-
-    override fun chapterFromElement(element: Element): SChapter {
-        val info = element.selectFirst("a.series-episode-list-container") ?: element
-        val mangaUrl = element.ownerDocument()!!.location()
-
-        return SChapter.create().apply {
-            name = info.selectFirst("h4.series-episode-list-title")!!.text()
-            if (chapterListMode == CHAPTER_LIST_PAID && element.selectFirst("span.series-episode-list-is-free") == null) {
-                name = YEN_BANKNOTE + name
-            } else if (chapterListMode == CHAPTER_LIST_LOCKED && element.hasClass("private")) {
-                name = LOCK + name
-            }
-            date_upload = DATE_PARSER_SIMPLE.tryParse(info.selectFirst("span.series-episode-list-date")?.text().orEmpty())
-            scanlator = publisher
-            setUrlWithoutDomain(if (info.tagName() == "a") info.attr("href") else mangaUrl)
-        }
+    override suspend fun getMangaByUrl(url: HttpUrl): SManga? {
+        if (url.host != baseUrl.toHttpUrl().host || url.pathSegments.first() !in listOf("episode", "volume")) return null
+        return fetchSeries(fetchSeriesId(url.toString())).toSManga()
     }
 
-    override fun pageListParse(document: Document): List<Page> {
-        val episode = document.selectFirst("script#episode-json")!!
-            .attr("data-value")
-            .let {
-                try {
-                    json.decodeFromString<GigaViewerEpisodeDto>(it)
-                } catch (e: SerializationException) {
-                    throw Exception("このチャプターは非公開です\nChapter is not available!")
-                }
-            }
+    override fun getMangaUrl(manga: SManga): String = baseUrl + manga.memo["path"]!!.string
 
-        val isScrambled = episode.readableProduct.pageStructure.choJuGiga == "baku"
+    override suspend fun fetchMangaUpdate(
+        manga: SManga,
+        chapters: List<SChapter>,
+        fetchDetails: Boolean,
+        fetchChapters: Boolean,
+    ): SMangaUpdate = coroutineScope {
+        val seriesId = if (manga.url.startsWith("/")) fetchSeriesId(baseUrl + manga.url) else manga.url // for old url compatibility
+        val series = fetchSeries(seriesId)
+        val details = series.toSManga()
 
-        return episode.readableProduct.pageStructure.pages
+        if (!fetchChapters) return@coroutineScope SMangaUpdate(details, chapters)
+
+        val hideLocked = preferences.getBoolean(HIDE_LOCKED_PREF_KEY, false)
+        val hideUnavailable = preferences.getBoolean(HIDE_UNAVAILABLE_PREF_KEY, false)
+        val episodes = async { fetchReadableProducts(seriesId, "episode", series.episodes.totalCount) }
+        val volumes = async { fetchReadableProducts(seriesId, "volume", series.volumes.totalCount) }
+        val chapterList = (episodes.await() + volumes.await())
+            .filterNot { (hideLocked && it.isLocked) || (hideUnavailable && it.isUnavailable()) }
+            .map { it.toSChapter(it.isUnavailable()) }
+
+        SMangaUpdate(
+            details,
+            chapterList,
+        )
+    }
+
+    private suspend fun fetchSeriesId(url: String): String = client.get(url).asJsoup().selectFirst("script.js-valve")!!.attr("data-giga_series")
+
+    private suspend fun fetchSeries(id: String): SeriesDetails = client.post(apiUrl, body = graphQLBody(SERIES_QUERY, variables = SeriesVariables(id))).parseGraphQLAs<SeriesResponse>().series
+
+    private suspend fun fetchReadableProducts(seriesId: String, type: String, count: Int): List<ReadableProduct> {
+        val products = mutableListOf<ReadableProduct>()
+        while (products.size < count) {
+            val url = "$baseUrl/api/viewer/pagination_readable_products".toHttpUrl().newBuilder()
+                .addQueryParameter("type", type)
+                .addQueryParameter("aggregate_id", seriesId)
+                .addQueryParameter("sort_order", "desc")
+                .addQueryParameter("offset", products.size.toString())
+                .build()
+            val result = client.get(url).parseAs<List<ReadableProduct>>()
+            if (result.isEmpty()) break
+            products += result
+        }
+        return products
+    }
+
+    /** Whether a chapter can't be read at all. It then gets a 🔒 and "Hide Unavailable Chapters" removes it. */
+    protected open fun ReadableProduct.isUnavailable(): Boolean = purchaseInfo.unavailable
+
+    override fun getChapterUrl(chapter: SChapter): String = "$baseUrl/${chapter.memo["type"]!!.string}/${chapter.url}"
+
+    override suspend fun getPageList(chapter: SChapter): List<Page> {
+        val pageStructure = client.get(getChapterUrl(chapter)).asJsoup()
+            .selectFirst("script#episode-json")!!.attr("data-value")
+            .parseAs<ViewerDto>().readableProduct.pageStructure
+
+        if (pageStructure == null || pageStructure.pages.isEmpty()) {
+            throw Exception("This chapter is either unavailable or must be purchased.")
+        }
+
+        val isScrambled = pageStructure.choJuGiga == "baku"
+        return pageStructure.pages
             .filter { it.type == "main" }
             .mapIndexed { i, page ->
-                val imageUrl = page.src.toHttpUrl().newBuilder().apply {
-                    addQueryParameter("width", page.width.toString())
-                    addQueryParameter("height", page.height.toString())
-                    if (isScrambled) {
-                        addQueryParameter("baku", "true")
-                    }
-                }.toString()
-                Page(i, document.location(), imageUrl)
+                val src = page.src!!
+                Page(i, imageUrl = if (isScrambled) "$src#scramble" else src)
             }
     }
 
-    override fun imageUrlParse(document: Document) = ""
-
-    override fun imageRequest(page: Page): Request {
-        val newHeaders = headersBuilder()
-            .set("Referer", page.url)
-            .build()
-
-        return GET(page.imageUrl!!, newHeaders)
-    }
-
-    protected data class Collection(val name: String, val path: String) {
-        override fun toString(): String = name
-    }
-
-    private class CollectionFilter(val collections: List<Collection>) : Filter.Select<Collection>(
-        "コレクション",
-        collections.toTypedArray(),
-    ) {
-        val selected: Collection
-            get() = collections[state]
-    }
-
-    override fun getFilterList(): FilterList = FilterList(CollectionFilter(getCollections()))
-
-    protected open fun getCollections(): List<Collection> = emptyList()
-
-    protected open fun imageIntercept(chain: Interceptor.Chain): Response {
-        var request = chain.request()
-
-        if (!request.url.toString().startsWith(cdnUrl) || request.url.queryParameter("baku") != "true") {
-            return chain.proceed(request)
+    override fun getFilterList(data: JsonElement?): FilterList {
+        val options = getFilterOptions()
+        return if (options.isNotEmpty()) {
+            FilterList(CollectionFilter(options))
+        } else {
+            FilterList()
         }
-
-        val width = request.url.queryParameter("width")!!.toInt()
-        val height = request.url.queryParameter("height")!!.toInt()
-
-        val newUrl = request.url.newBuilder()
-            .removeAllQueryParameters("width")
-            .removeAllQueryParameters("height")
-            .removeAllQueryParameters("baku")
-            .build()
-        request = request.newBuilder().url(newUrl).build()
-
-        val response = chain.proceed(request)
-        val image = decodeImage(response.body.byteStream(), width, height)
-        val body = image.toResponseBody(jpegMediaType)
-
-        response.close()
-
-        return response.newBuilder().body(body).build()
     }
 
-    protected open fun decodeImage(image: InputStream, width: Int, height: Int): ByteArray {
-        val input = BitmapFactory.decodeStream(image)
-        val cWidth = (floor(width.toDouble() / (DIVIDE_NUM * MULTIPLE)) * MULTIPLE).toInt()
-        val cHeight = (floor(height.toDouble() / (DIVIDE_NUM * MULTIPLE)) * MULTIPLE).toInt()
+    /**
+     * Filter options, each a label and the series lists it shows.
+     * The ids are found as described in [seriesListIds].
+     */
+    protected open fun getFilterOptions(): List<Pair<String, List<String>>> = emptyList()
 
-        val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(result)
+    override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        SwitchPreferenceCompat(screen.context).apply {
+            key = HIDE_LOCKED_PREF_KEY
+            title = "Hide Paid Chapters"
+            setDefaultValue(false)
+        }.also(screen::addPreference)
 
-        val imageRect = Rect(0, 0, width, height)
-        canvas.drawBitmap(input, imageRect, imageRect, null)
-
-        for (e in 0 until DIVIDE_NUM * DIVIDE_NUM) {
-            val x = e % DIVIDE_NUM * cWidth
-            val y = (floor(e.toFloat() / DIVIDE_NUM) * cHeight).toInt()
-            val cellSrc = Rect(x, y, x + cWidth, y + cHeight)
-
-            val row = floor(e.toFloat() / DIVIDE_NUM).toInt()
-            val dstE = e % DIVIDE_NUM * DIVIDE_NUM + row
-            val dstX = dstE % DIVIDE_NUM * cWidth
-            val dstY = (floor(dstE.toFloat() / DIVIDE_NUM) * cHeight).toInt()
-            val cellDst = Rect(dstX, dstY, dstX + cWidth, dstY + cHeight)
-            canvas.drawBitmap(input, cellSrc, cellDst, null)
-        }
-
-        val output = ByteArrayOutputStream()
-        result.compress(Bitmap.CompressFormat.JPEG, 90, output)
-        return output.toByteArray()
-    }
-
-    private fun Call.asObservableIgnoreCode(code: Int): Observable<Response> {
-        return asObservable().doOnNext { response ->
-            if (!response.isSuccessful && response.code != code) {
-                response.close()
-                throw Exception("HTTP error ${response.code}")
-            }
-        }
+        SwitchPreferenceCompat(screen.context).apply {
+            key = HIDE_UNAVAILABLE_PREF_KEY
+            title = "Hide Unavailable Chapters"
+            setDefaultValue(false)
+        }.also(screen::addPreference)
     }
 
     companion object {
-        private const val DIVIDE_NUM = 4
-        private const val MULTIPLE = 8
-        private val jpegMediaType = "image/jpeg".toMediaType()
-
-        const val CHAPTER_LIST_PAID = 0
-        const val CHAPTER_LIST_LOCKED = 1
-
-        const val YEN_BANKNOTE = "💴 "
-        const val LOCK = "🔒 "
+        private const val HIDE_LOCKED_PREF_KEY = "hide_locked"
+        private const val HIDE_UNAVAILABLE_PREF_KEY = "hide_unavailable"
     }
 }

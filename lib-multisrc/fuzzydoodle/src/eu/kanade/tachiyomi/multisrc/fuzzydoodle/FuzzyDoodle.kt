@@ -1,55 +1,36 @@
 package eu.kanade.tachiyomi.multisrc.fuzzydoodle
 
-import android.util.Log
-import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.network.await
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.online.ParsedHttpSource
-import eu.kanade.tachiyomi.util.asJsoup
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import eu.kanade.tachiyomi.source.model.SMangaUpdate
+import keiyoushi.network.get
+import keiyoushi.source.KeiSource
+import keiyoushi.utils.asJsoup
+import keiyoushi.utils.parseAs
+import keiyoushi.utils.toJsonElement
+import kotlinx.serialization.json.JsonElement
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.Request
-import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
-import java.lang.Exception
 import java.util.Calendar
 
 /*
  * https://github.com/jhin1m/fuzzy-doodle
  */
-abstract class FuzzyDoodle(
-    override val name: String,
-    override val baseUrl: String,
-    override val lang: String,
-) : ParsedHttpSource() {
-
-    override val supportsLatest = true
-
-    override val client = network.cloudflareClient
-
-    override fun headersBuilder() = super.headersBuilder()
-        .add("Referer", "$baseUrl/")
+abstract class FuzzyDoodle : KeiSource() {
 
     // Popular
-    override fun popularMangaRequest(page: Int) =
-        GET("$baseUrl/manga?page=$page", headers)
+    override suspend fun getPopularManga(page: Int) = popularMangaParse(client.get("$baseUrl/manga?page=$page").asJsoup())
 
-    override fun popularMangaSelector() = "div#card-real"
-    override fun popularMangaNextPageSelector() = "ul.pagination > li:last-child:not(.pagination-disabled)"
+    open fun popularMangaSelector() = "div#card-real"
+    open fun popularMangaNextPageSelector() = "ul.pagination > li:last-child:not(.pagination-disabled)"
 
-    override fun popularMangaParse(response: Response): MangasPage {
-        val document = response.asJsoup()
-
-        launchIO { fetchFilters(document) }
-
+    protected fun popularMangaParse(document: Document): MangasPage {
         val entries = document.select(popularMangaSelector())
             .map(::popularMangaFromElement)
         val hasNextPage = document.selectFirst(popularMangaNextPageSelector()) != null
@@ -57,7 +38,7 @@ abstract class FuzzyDoodle(
         return MangasPage(entries, hasNextPage)
     }
 
-    override fun popularMangaFromElement(element: Element) = SManga.create().apply {
+    open fun popularMangaFromElement(element: Element) = SManga.create().apply {
         setUrlWithoutDomain(element.selectFirst("a")!!.absUrl("href"))
         title = element.selectFirst("h2.text-sm")!!.text()
         thumbnail_url = element.selectFirst("img")?.imgAttr()
@@ -66,38 +47,32 @@ abstract class FuzzyDoodle(
     // latest
     protected open val latestFromHomePage = false
 
-    override fun latestUpdatesRequest(page: Int) =
-        if (latestFromHomePage) {
-            latestHomePageRequest(page)
-        } else {
-            latestPageRequest(page)
-        }
+    override suspend fun getLatestUpdates(page: Int): MangasPage {
+        val url = if (latestFromHomePage) latestHomePageUrl(page) else latestPageUrl(page)
+        val document = client.get(url).asJsoup()
+        val entries = document.select(latestUpdatesSelector())
+            .map(::latestUpdatesFromElement)
+        val hasNextPage = document.selectFirst(latestUpdatesNextPageSelector()) != null
 
-    protected open fun latestHomePageRequest(page: Int) =
-        GET("$baseUrl/?page=$page", headers)
-
-    protected open fun latestPageRequest(page: Int) =
-        GET("$baseUrl/latest?page=$page", headers)
-
-    override fun latestUpdatesSelector() =
-        if (latestFromHomePage) {
-            "section:has(h2:containsOwn(Recent Chapters)) div#card-real," +
-                " section:has(h2:containsOwn(Chapitres récents)) div#card-real"
-        } else {
-            popularMangaSelector()
-        }
-
-    override fun latestUpdatesNextPageSelector() = popularMangaNextPageSelector()
-    override fun latestUpdatesFromElement(element: Element) = popularMangaFromElement(element)
-
-    override fun latestUpdatesParse(response: Response): MangasPage {
-        launchIO { fetchFilters() }
-
-        return super.latestUpdatesParse(response)
+        return MangasPage(entries, hasNextPage)
     }
 
+    protected open fun latestHomePageUrl(page: Int) = "$baseUrl/?page=$page"
+
+    protected open fun latestPageUrl(page: Int) = "$baseUrl/latest?page=$page"
+
+    open fun latestUpdatesSelector() = if (latestFromHomePage) {
+        "section:has(h2:containsOwn(Recent Chapters)) div#card-real," +
+            " section:has(h2:containsOwn(Chapitres récents)) div#card-real"
+    } else {
+        popularMangaSelector()
+    }
+
+    open fun latestUpdatesNextPageSelector() = popularMangaNextPageSelector()
+    open fun latestUpdatesFromElement(element: Element) = popularMangaFromElement(element)
+
     // search
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
+    override suspend fun getSearchMangaList(page: Int, query: String, filters: FilterList): MangasPage {
         val url = "$baseUrl/manga".toHttpUrl().newBuilder().apply {
             addQueryParameter("title", query.trim())
             filters.filterIsInstance<UrlPartFilter>().forEach {
@@ -108,79 +83,71 @@ abstract class FuzzyDoodle(
             }
         }.build()
 
-        return GET(url, headers)
+        return popularMangaParse(client.get(url).asJsoup())
     }
 
-    override fun searchMangaParse(response: Response) = popularMangaParse(response)
-    override fun searchMangaSelector() = popularMangaSelector()
-    override fun searchMangaFromElement(element: Element) = popularMangaFromElement(element)
-    override fun searchMangaNextPageSelector() = popularMangaNextPageSelector()
+    open fun searchMangaSelector() = popularMangaSelector()
+    open fun searchMangaFromElement(element: Element) = popularMangaFromElement(element)
+    open fun searchMangaNextPageSelector() = popularMangaNextPageSelector()
+
+    override suspend fun getMangaByUrl(url: HttpUrl): SManga? {
+        if (url.host != baseUrl.toHttpUrl().host || url.pathSegments.firstOrNull() != "manga" || url.pathSegments.size < 2) return null
+
+        return mangaDetailsParse(client.get(url).asJsoup()).apply { setUrlWithoutDomain(url.toString()) }
+    }
 
     // filters
-    protected var typeList = listOf<Pair<String, String>>()
-    protected var statusList = listOf<Pair<String, String>>()
-    protected var genreList = listOf<Pair<String, String>>()
-    private var fetchFilterAttempts = 0
+    override val supportsFilterFetching get() = true
 
-    protected suspend fun fetchFilters(document: Document? = null) {
-        if (fetchFilterAttempts < 3 && (typeList.isEmpty() || statusList.isEmpty() || genreList.isEmpty())) {
-            try {
-                val doc = document ?: client.newCall(filtersRequest())
-                    .await()
-                    .asJsoup()
+    override suspend fun fetchFilterData(): JsonElement = parseFilters(client.get("$baseUrl/manga").asJsoup()).toJsonElement()
 
-                parseFilters(doc)
-            } catch (e: Exception) {
-                Log.e("$name: Filters", e.stackTraceToString())
-            }
-            fetchFilterAttempts++
-        }
-    }
-
-    protected open fun filtersRequest() = GET("$baseUrl/manga", headers)
-
-    protected open fun parseFilters(document: Document) {
-        typeList = document.select("select[name=type] > option").map {
+    protected open fun parseFilters(document: Document) = FilterData(
+        types = document.select("select[name=type] > option").map {
             it.ownText() to it.attr("value")
-        }
-        statusList = document.select("select[name=status] > option").map {
+        },
+        statuses = document.select("select[name=status] > option").map {
             it.ownText() to it.attr("value")
-        }
-        genreList = document.select("div.grid > div.flex:has(> input[name=genre[]])").mapNotNull {
+        },
+        genres = document.select("div.grid > div.flex:has(> input[name=genre[]])").mapNotNull {
             val label = it.selectFirst("label")?.ownText()
                 ?: return@mapNotNull null
             val value = it.selectFirst("input")?.attr("value")
                 ?: return@mapNotNull null
 
             label to value
-        }
-    }
+        },
+    )
 
-    override fun getFilterList(): FilterList {
+    override fun getFilterList(data: JsonElement?): FilterList {
+        val filterData = data?.parseAs<FilterData>() ?: return FilterList()
         val filters = mutableListOf<Filter<*>>()
 
-        if (typeList.isNotEmpty()) {
-            filters.add(TypeFilter(typeList))
+        if (filterData.types.isNotEmpty()) {
+            filters.add(TypeFilter(filterData.types))
         }
-        if (statusList.isNotEmpty()) {
-            filters.add(StatusFilter(statusList))
+        if (filterData.statuses.isNotEmpty()) {
+            filters.add(StatusFilter(filterData.statuses))
         }
-        if (genreList.isNotEmpty()) {
-            filters.add(GenreFilter(genreList))
-        }
-        if (filters.size < 3) {
-            filters.add(0, Filter.Header("Press 'reset' to load more filters"))
+        if (filterData.genres.isNotEmpty()) {
+            filters.add(GenreFilter(filterData.genres))
         }
 
         return FilterList(filters)
     }
 
-    private val scope = CoroutineScope(Dispatchers.IO)
-
-    protected fun launchIO(block: suspend () -> Unit) = scope.launch { block() }
+    // details and chapters come from the same page
+    override suspend fun fetchMangaUpdate(
+        manga: SManga,
+        chapters: List<SChapter>,
+        fetchDetails: Boolean,
+        fetchChapters: Boolean,
+    ): SMangaUpdate {
+        val document = client.get(getMangaUrl(manga)).asJsoup()
+        return SMangaUpdate(mangaDetailsParse(document), fetchChapterList(document))
+    }
 
     // details
-    override fun mangaDetailsParse(document: Document) = SManga.create().apply {
+    protected open fun mangaDetailsParse(document: Document): SManga = SManga.create().apply {
         val genres = mutableListOf<String>()
         with(document.selectFirst("main > section > div")!!) {
             thumbnail_url = selectFirst("div.relative img")?.imgAttr()
@@ -196,7 +163,7 @@ abstract class FuzzyDoodle(
                     if (it.isNotEmpty()) {
                         append("\n\n")
                         append("Alternative Title: ")
-                        append(it.trim())
+                        append(it)
                     }
                 }
             }.trim()
@@ -222,41 +189,34 @@ abstract class FuzzyDoodle(
         }
     }
 
-    protected fun Element.getInfo(text: String): String? =
-        selectFirst("p:has(span:containsOwn($text)) span.capitalize")
-            ?.ownText()
-            ?.trim()
+    protected fun Element.getInfo(text: String): String? = selectFirst("p:has(span:containsOwn($text)) span.capitalize")
+        ?.ownText()
 
-    protected fun String?.removePlaceHolder(): String? =
-        takeUnless { it == "-" }
+    protected fun String?.removePlaceHolder(): String? = takeUnless { it == "-" }
 
     // chapters
-    override fun chapterListParse(response: Response): List<SChapter> {
-        val originalUrl = response.request.url.toString()
+    private suspend fun fetchChapterList(firstPage: Document): List<SChapter> {
+        val originalUrl = firstPage.location()
 
         val chapterList = buildList {
             var page = 1
-            do {
-                val doc = when {
-                    isEmpty() -> response // First page
-                    else -> {
-                        page++
-                        client.newCall(GET("$originalUrl?page=$page", headers)).execute()
-                    }
-                }.asJsoup()
-
+            var doc = firstPage
+            while (true) {
                 addAll(doc.select(chapterListSelector()).map(::chapterFromElement))
-            } while (doc.selectFirst(chapterListNextPageSelector()) != null)
+                if (doc.selectFirst(chapterListNextPageSelector()) == null) break
+                page++
+                doc = client.get("$originalUrl?page=$page").asJsoup()
+            }
         }
 
         return chapterList
     }
 
-    override fun chapterListSelector() = "div#chapters-list > a[href]"
+    open fun chapterListSelector() = "div#chapters-list > a[href]"
     protected fun chapterListNextPageSelector() = latestUpdatesNextPageSelector()
 
-    override fun chapterFromElement(element: Element) = SChapter.create().apply {
-        setUrlWithoutDomain(element.attr("href"))
+    open fun chapterFromElement(element: Element) = SChapter.create().apply {
+        setUrlWithoutDomain(element.absUrl("href"))
         name = element.selectFirst("#item-title, span")!!.ownText()
         date_upload = element.selectFirst("span.text-gray-500")?.text().parseRelativeDate()
     }
@@ -265,53 +225,59 @@ abstract class FuzzyDoodle(
     protected open fun String?.parseRelativeDate(): Long {
         this ?: return 0L
 
-        val number = Regex("""(\d+)""").find(this)?.value?.toIntOrNull() ?: return 0L
+        val number = numberRegex.find(this)?.value?.toIntOrNull() ?: return 0L
         val cal = Calendar.getInstance()
 
         return when {
             listOf("detik", "segundo", "second", "วินาที").any { contains(it, true) } -> {
                 cal.apply { add(Calendar.SECOND, -number) }.timeInMillis
             }
+
             listOf("menit", "dakika", "min", "minute", "minuto", "นาที", "دقائق").any { contains(it, true) } -> {
                 cal.apply { add(Calendar.MINUTE, -number) }.timeInMillis
             }
+
             listOf("jam", "saat", "heure", "hora", "hour", "ชั่วโมง", "giờ", "ore", "ساعة", "小时").any { contains(it, true) } -> {
                 cal.apply { add(Calendar.HOUR, -number) }.timeInMillis
             }
+
             listOf("hari", "gün", "jour", "día", "dia", "day", "วัน", "ngày", "giorni", "أيام", "天").any { contains(it, true) } -> {
                 cal.apply { add(Calendar.DAY_OF_YEAR, -number) }.timeInMillis
             }
+
             listOf("week", "sema").any { contains(it, true) } -> {
                 cal.apply { add(Calendar.WEEK_OF_YEAR, -number) }.timeInMillis
             }
+
             listOf("month", "mes").any { it in this } -> {
                 cal.apply { add(Calendar.MONTH, -number) }.timeInMillis
             }
+
             listOf("year", "año").any { it in this } -> {
                 cal.apply { add(Calendar.YEAR, -number) }.timeInMillis
             }
+
             else -> 0L
         }
     }
 
     // pages
-    override fun pageListParse(document: Document): List<Page> {
+    override suspend fun getPageList(chapter: SChapter): List<Page> {
+        val document = client.get(getChapterUrl(chapter)).asJsoup()
         return document.select("div#chapter-container > img").mapIndexed { idx, img ->
             Page(idx, imageUrl = img.imgAttr())
         }
     }
 
-    private fun Element.imgAttr(): String {
-        return when {
-            hasAttr("srcset") -> attr("srcset").substringBefore(" ")
-            hasAttr("data-cfsrc") -> absUrl("data-cfsrc")
-            hasAttr("data-src") -> absUrl("data-src")
-            hasAttr("data-lazy-src") -> absUrl("data-lazy-src")
-            else -> absUrl("src")
-        }
+    private fun Element.imgAttr(): String = when {
+        hasAttr("srcset") -> attr("srcset").substringBefore(" ")
+        hasAttr("data-cfsrc") -> absUrl("data-cfsrc")
+        hasAttr("data-src") -> absUrl("data-src")
+        hasAttr("data-lazy-src") -> absUrl("data-lazy-src")
+        else -> absUrl("src")
     }
 
-    override fun imageUrlParse(document: Document): String {
-        throw UnsupportedOperationException()
+    companion object {
+        private val numberRegex = Regex("""(\d+)""")
     }
 }

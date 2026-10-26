@@ -5,32 +5,25 @@ import eu.kanade.tachiyomi.source.model.SManga
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import org.jsoup.Jsoup
-import java.text.SimpleDateFormat
-import java.util.Locale
-
-private val DATE_FORMATTER by lazy {
-    SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-}
-
-private fun parseDate(dateStr: String): Long {
-    return runCatching { DATE_FORMATTER.parse(dateStr)?.time }
-        .getOrNull() ?: 0L
-}
 
 @Serializable
-data class ZeistMangaDto(
+class ZeistMangaDto(
     val feed: ZeistMangaFeedDto? = null,
 )
 
 @Serializable
-data class ZeistMangaFeedDto(
+class ZeistMangaFeedDto(
+    @SerialName("openSearch\$totalResults") val totalResults: TotalResult? = null,
+    @SerialName("openSearch\$itemsPerPage") val itemsPerPage: TotalResult? = null,
+    val category: List<ZeistMangaCategoryDto>? = emptyList(),
     val entry: List<ZeistMangaEntryDto>? = emptyList(),
 )
 
 @Serializable
-data class ZeistMangaEntryDto(
+class ZeistMangaEntryDto(
     val title: ZeistMangaEntryTitleDto? = null,
     val published: ZeistMangaEntryPublishedDto? = null,
+    val updated: ZeistMangaEntryUpdatedDto? = null,
     val category: List<ZeistMangaEntryCategory>? = emptyList(),
     @SerialName("link") val url: List<ZeistMangaEntryLink>? = emptyList(),
     val content: ZeistMangaEntryContentDto? = null,
@@ -46,21 +39,20 @@ data class ZeistMangaEntryDto(
         }
     }
 
-    fun toSChapter(baseurl: String): SChapter = SChapter.create().apply {
+    fun toSChapter(baseurl: String, dateUpload: Long = 0L): SChapter = SChapter.create().apply {
         name = this@ZeistMangaEntryDto.title!!.t
         url = getChapterLink(this@ZeistMangaEntryDto.url!!).substringAfter(baseurl)
-        val chapterDate = this@ZeistMangaEntryDto.published!!.t.trim()
-        date_upload = parseDate(chapterDate)
+        date_upload = dateUpload
     }
 
-    private fun getChapterLink(list: List<ZeistMangaEntryLink>): String {
-        return list.first { it.rel == "alternate" }.href
-    }
+    fun getPublishedDate() = published?.t?.trim()
 
-    private fun getThumbnail(thumbnail: ZeistMangaEntryThumbnail): String {
-        return thumbnail.url.replace("""\/s.+?-c\/""".toRegex(), "/w600/")
-            .replace("""=s(?!.*=s).+?-c$""".toRegex(), "=w600")
-    }
+    fun getUpdatedDate() = updated?.t?.trim()
+
+    private fun getChapterLink(list: List<ZeistMangaEntryLink>): String = list.first { it.rel == "alternate" }.href
+
+    private fun getThumbnail(thumbnail: ZeistMangaEntryThumbnail): String = thumbnail.url.replace("""\/s.+?-c\/""".toRegex(), "/w600/")
+        .replace("""=s(?!.*=s).+?-c$""".toRegex(), "=w600")
 
     private fun getThumbnailFromContent(html: ZeistMangaEntryContentDto): String {
         val document = Jsoup.parse(html.t)
@@ -69,32 +61,56 @@ data class ZeistMangaEntryDto(
 }
 
 @Serializable
-data class ZeistMangaEntryTitleDto(
+class ZeistMangaCategoryDto(
+    val term: String,
+)
+
+@Serializable
+class ZeistMangaEntryTitleDto(
     @SerialName("\$t") val t: String,
 )
 
 @Serializable
-data class ZeistMangaEntryPublishedDto(
+class ZeistMangaEntryPublishedDto(
     @SerialName("\$t") val t: String,
 )
 
 @Serializable
-data class ZeistMangaEntryContentDto(
+class ZeistMangaEntryUpdatedDto(
     @SerialName("\$t") val t: String,
 )
 
 @Serializable
-data class ZeistMangaEntryLink(
+class ZeistMangaEntryContentDto(
+    @SerialName("\$t") val t: String,
+)
+
+@Serializable
+class TotalResult(
+    @SerialName("\$t") val t: String,
+
+)
+
+@Serializable
+class ZeistMangaEntryLink(
     val rel: String,
     val href: String,
 )
 
 @Serializable
-data class ZeistMangaEntryCategory(
+class ZeistMangaEntryCategory(
     val term: String,
 )
 
 @Serializable
-data class ZeistMangaEntryThumbnail(
+class ZeistMangaEntryThumbnail(
     val url: String,
+)
+
+@Serializable
+class FeedUrl(
+    val url: String,
+    val old: Boolean,
+    val new: Boolean,
+    val category: String,
 )

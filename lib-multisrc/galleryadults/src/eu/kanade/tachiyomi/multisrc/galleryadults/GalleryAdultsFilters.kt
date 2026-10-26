@@ -3,13 +3,28 @@ package eu.kanade.tachiyomi.multisrc.galleryadults
 import eu.kanade.tachiyomi.source.model.Filter
 
 class Genre(name: String, val uri: String) : Filter.CheckBox(name)
-class GenresFilter(genres: Map<String, String>) : Filter.Group<Genre>(
-    "Tags",
-    genres.map { Genre(it.key, it.value) },
-)
 
-class SortOrderFilter(sortOrderURIs: List<Pair<String, String>>) :
-    Filter.Select<String>("Sort By", sortOrderURIs.map { it.first }.toTypedArray())
+class GenresFilter(genres: Map<String, String>) :
+    Filter.Group<GenreGroup>(
+        "Tags",
+        genres.toList().sortedBy { it.first }.groupBy {
+            val c = it.second.firstOrNull()?.uppercase()
+            if (c != null && c in "A".."Z") c else "#"
+        }
+            .map { (letter, chunk) -> GenreGroup(letter, chunk) },
+    ) {
+    val selected get() = state.flatMap { it.state.filter { it.state } }
+}
+
+class GenreGroup(letter: String, val genres: List<Pair<String, String>>) :
+    Filter.Group<Genre>(
+        letter,
+        genres.map {
+            Genre(it.first, it.second)
+        },
+    )
+
+class SortOrderFilter(sortOrderURIs: List<Pair<String, String>>) : Filter.Select<String>("Sort By", sortOrderURIs.map { it.first }.toTypedArray())
 
 class FavoriteFilter : Filter.CheckBox("Show favorites only (login via WebView)", false)
 

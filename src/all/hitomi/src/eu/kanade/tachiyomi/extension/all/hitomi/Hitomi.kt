@@ -8,10 +8,13 @@ import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
+import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
-import eu.kanade.tachiyomi.source.online.HttpSource
+import keiyoushi.annotation.Source
+import keiyoushi.network.get
+import keiyoushi.source.KeiSource
 import keiyoushi.utils.parseAs
-import keiyoushi.utils.tryParse
+import keiyoushi.utils.tryParseDateTime
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -19,19 +22,22 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.JsonElement
 import okhttp3.CacheControl
 import okhttp3.Call
+import okhttp3.Headers
 import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Interceptor
+import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.internal.http2.ErrorCode
 import okhttp3.internal.http2.StreamResetException
-import rx.Observable
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
-import java.text.SimpleDateFormat
+import java.time.format.DateTimeFormatter
 import java.util.LinkedHashSet
 import java.util.LinkedList
 import java.util.Locale
@@ -39,67 +45,80 @@ import kotlin.math.min
 import kotlin.time.Duration.Companion.seconds
 
 @OptIn(ExperimentalUnsignedTypes::class)
-class Hitomi(
-    override val lang: String,
-    private val nozomiLang: String,
-) : HttpSource() {
+@Source
+abstract class Hitomi : KeiSource() {
 
-    override val name = "Hitomi"
+    private val nozomiLang: String
+        get() = when (lang) {
+            "all" -> "all"
+            "en" -> "english"
+            "id" -> "indonesian"
+            "jv" -> "javanese"
+            "ca" -> "catalan"
+            "ceb" -> "cebuano"
+            "cs" -> "czech"
+            "da" -> "danish"
+            "de" -> "german"
+            "et" -> "estonian"
+            "es" -> "spanish"
+            "eo" -> "esperanto"
+            "fr" -> "french"
+            "it" -> "italian"
+            "hi" -> "hindi"
+            "hu" -> "hungarian"
+            "pl" -> "polish"
+            "pt" -> "portuguese"
+            "vi" -> "vietnamese"
+            "tr" -> "turkish"
+            "ru" -> "russian"
+            "uk" -> "ukrainian"
+            "ar" -> "arabic"
+            "ko" -> "korean"
+            "zh" -> "chinese"
+            "ja" -> "japanese"
+            else -> lang
+        }
 
     private val cdnDomain = "gold-usergeneratedcontent.net"
-
-    override val baseUrl = "https://hitomi.la"
 
     private val ltnUrl = "https://ltn.$cdnDomain"
 
     override val supportsLatest = true
 
-    override val client = network.cloudflareClient.newBuilder()
-        .addInterceptor(::imageUrlInterceptor)
-        .build()
+    override fun OkHttpClient.Builder.configureClient() = addInterceptor(::imageUrlInterceptor)
 
-    override fun headersBuilder() = super.headersBuilder()
-        .set("referer", "$baseUrl/")
+    override fun Headers.Builder.configureHeaders() = set("referer", "$baseUrl/")
         .set("origin", baseUrl)
 
-    override fun fetchPopularManga(page: Int): Observable<MangasPage> = Observable.fromCallable {
-        runBlocking {
-            val entries = getGalleryIDsFromNozomi("popular", "year", nozomiLang, page.nextPageRange())
-                .toMangaList()
-
-            MangasPage(entries, entries.size >= 24)
-        }
+    override suspend fun getPopularManga(page: Int): MangasPage {
+        val entries = getGalleryIDsFromNozomi("popular", "year", nozomiLang, page.nextPageRange())
+            .toMangaList()
+        return MangasPage(entries, entries.size >= 24)
     }
 
-    override fun fetchLatestUpdates(page: Int): Observable<MangasPage> = Observable.fromCallable {
-        runBlocking {
-            val entries = getGalleryIDsFromNozomi(null, "index", nozomiLang, page.nextPageRange())
-                .toMangaList()
-
-            MangasPage(entries, entries.size >= 24)
-        }
+    override suspend fun getLatestUpdates(page: Int): MangasPage {
+        val entries = getGalleryIDsFromNozomi(null, "index", nozomiLang, page.nextPageRange())
+            .toMangaList()
+        return MangasPage(entries, entries.size >= 24)
     }
 
-    private lateinit var searchResponse: List<Int>
+    private var searchResponse: Pair<Pair<String, FilterList>, List<Int>>? = null
 
-    override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> = Observable.fromCallable {
-        runBlocking {
-            if (page == 1) {
-                searchResponse = hitomiSearch(
-                    query.trim(),
-                    filters,
-                    nozomiLang,
-                )
-            }
-
-            val end = min(page * 25, searchResponse.size)
-            val entries = searchResponse.subList((page - 1) * 25, end)
-                .toMangaList()
-            MangasPage(entries, end < searchResponse.size)
+    override suspend fun getSearchMangaList(page: Int, query: String, filters: FilterList): MangasPage {
+        val key = query to filters
+        val cached = searchResponse
+        val results = if (page == 1 || cached?.first != key) {
+            hitomiSearch(query.trim(), filters, nozomiLang).also { searchResponse = key to it }
+        } else {
+            cached.second
         }
+        val start = (page - 1) * 25
+        val end = min(page * 25, results.size)
+        val entries = if (start >= results.size) emptyList() else results.subList(start, end).toMangaList()
+        return MangasPage(entries, end < results.size)
     }
 
-    override fun getFilterList() = getFilters()
+    override fun getFilterList(data: JsonElement?) = getFilters()
 
     private fun Int.nextPageRange(): LongRange {
         val byteOffset = ((this - 1) * 25) * 4L
@@ -140,128 +159,127 @@ class Hitomi(
         query: String,
         filters: FilterList,
         language: String = "all",
-    ): List<Int> =
-        coroutineScope {
-            var sortBy: Pair<String?, String> = Pair(null, "index")
-            var random = false
+    ): List<Int> = coroutineScope {
+        var sortBy: Pair<String?, String> = Pair(null, "index")
+        var random = false
 
-            val terms = query
-                .trim()
-                .lowercase()
-                .split(Regex("\\s+"))
-                .toMutableList()
+        val terms = query
+            .trim()
+            .lowercase()
+            .split(Regex("\\s+"))
+            .toMutableList()
 
-            filters.forEach {
-                when (it) {
-                    is SelectFilter -> {
-                        sortBy = Pair(it.getArea(), it.getValue())
-                        random = (it.vals[it.state].first == "Random")
+        filters.forEach {
+            when (it) {
+                is SelectFilter -> {
+                    sortBy = Pair(it.getArea(), it.getValue())
+                    random = (it.vals[it.state].first == "Random")
+                }
+
+                is TypeFilter -> {
+                    val (activeFilter, inactiveFilters) = it.state.partition { stIt -> stIt.state }
+                    terms += when {
+                        inactiveFilters.size < 5 -> inactiveFilters.map { fil -> "-type:${fil.value}" }
+                        inactiveFilters.size == 5 -> listOf("type:${activeFilter[0].value}")
+                        else -> listOf("type: none")
                     }
+                }
 
-                    is TypeFilter -> {
-                        val (activeFilter, inactiveFilters) = it.state.partition { stIt -> stIt.state }
-                        terms += when {
-                            inactiveFilters.size < 5 -> inactiveFilters.map { fil -> "-type:${fil.value}" }
-                            inactiveFilters.size == 5 -> listOf("type:${activeFilter[0].value}")
-                            else -> listOf("type: none")
-                        }
-                    }
-
-                    is TextFilter -> {
-                        if (it.state.isNotEmpty()) {
-                            terms += it.state.split(",").filter(String::isNotBlank).map { tag ->
-                                val trimmed = tag.trim()
-                                buildString {
-                                    if (trimmed.startsWith('-')) {
-                                        append("-")
-                                    }
-                                    append(it.type)
-                                    append(":")
-                                    append(trimmed.lowercase().removePrefix("-"))
+                is TextFilter -> {
+                    if (it.state.isNotEmpty()) {
+                        terms += it.state.split(",").filter(String::isNotBlank).map { tag ->
+                            val trimmed = tag.trim()
+                            buildString {
+                                if (trimmed.startsWith('-')) {
+                                    append("-")
                                 }
+                                append(it.type)
+                                append(":")
+                                append(trimmed.lowercase().removePrefix("-"))
                             }
                         }
                     }
-                    else -> {}
                 }
-            }
-
-            if (language != "all" && sortBy == Pair(null, "index") && !terms.any { it.contains(":") }) {
-                terms += "language:$language"
-            }
-
-            val positiveTerms = LinkedList<String>()
-            val negativeTerms = LinkedList<String>()
-
-            for (term in terms) {
-                if (term.startsWith("-")) {
-                    negativeTerms.push(term.removePrefix("-"))
-                } else if (term.isNotBlank()) {
-                    positiveTerms.push(term)
-                }
-            }
-
-            val positiveResults = positiveTerms.map {
-                async {
-                    try {
-                        getGalleryIDsForQuery(it, language)
-                    } catch (e: IllegalArgumentException) {
-                        if (e.message?.equals("HTTP error 404") == true) {
-                            throw Exception("Unknown query: \"$it\"")
-                        } else {
-                            throw e
-                        }
-                    }
-                }
-            }
-
-            val negativeResults = negativeTerms.map {
-                async {
-                    try {
-                        getGalleryIDsForQuery(it, language)
-                    } catch (e: IllegalArgumentException) {
-                        if (e.message?.equals("HTTP error 404") == true) {
-                            throw Exception("Unknown query: \"$it\"")
-                        } else {
-                            throw e
-                        }
-                    }
-                }
-            }
-
-            val results = when {
-                positiveTerms.isEmpty() || sortBy != Pair(null, "index")
-                -> getGalleryIDsFromNozomi(sortBy.first, sortBy.second, language)
-                else -> emptySet()
-            }.toMutableSet()
-
-            fun filterPositive(newResults: Set<Int>) {
-                when {
-                    results.isEmpty() -> results.addAll(newResults)
-                    else -> results.retainAll(newResults)
-                }
-            }
-
-            fun filterNegative(newResults: Set<Int>) {
-                results.removeAll(newResults)
-            }
-
-            // positive results
-            positiveResults.forEach {
-                filterPositive(it.await())
-            }
-
-            // negative results
-            negativeResults.forEach {
-                filterNegative(it.await())
-            }
-
-            if (random) {
-                results.toList().shuffled()
-            } else {
-                results.toList()
+                else -> {}
             }
         }
+
+        if (language != "all" && sortBy == Pair(null, "index") && !terms.any { it.contains(":") }) {
+            terms += "language:$language"
+        }
+
+        val positiveTerms = LinkedList<String>()
+        val negativeTerms = LinkedList<String>()
+
+        for (term in terms) {
+            if (term.startsWith("-")) {
+                negativeTerms.push(term.removePrefix("-"))
+            } else if (term.isNotBlank()) {
+                positiveTerms.push(term)
+            }
+        }
+
+        val positiveResults = positiveTerms.map {
+            async {
+                try {
+                    getGalleryIDsForQuery(it, language)
+                } catch (e: IllegalArgumentException) {
+                    if (e.message?.equals("HTTP error 404") == true) {
+                        throw Exception("Unknown query: \"$it\"")
+                    } else {
+                        throw e
+                    }
+                }
+            }
+        }
+
+        val negativeResults = negativeTerms.map {
+            async {
+                try {
+                    getGalleryIDsForQuery(it, language)
+                } catch (e: IllegalArgumentException) {
+                    if (e.message?.equals("HTTP error 404") == true) {
+                        throw Exception("Unknown query: \"$it\"")
+                    } else {
+                        throw e
+                    }
+                }
+            }
+        }
+
+        val results = when {
+            positiveTerms.isEmpty() || sortBy != Pair(null, "index")
+            -> getGalleryIDsFromNozomi(sortBy.first, sortBy.second, language)
+            else -> emptySet()
+        }.toMutableSet()
+
+        fun filterPositive(newResults: Set<Int>) {
+            when {
+                results.isEmpty() -> results.addAll(newResults)
+                else -> results.retainAll(newResults)
+            }
+        }
+
+        fun filterNegative(newResults: Set<Int>) {
+            results.removeAll(newResults)
+        }
+
+        // positive results
+        positiveResults.forEach {
+            filterPositive(it.await())
+        }
+
+        // negative results
+        negativeResults.forEach {
+            filterNegative(it.await())
+        }
+
+        if (random) {
+            results.toList().shuffled()
+        } else {
+            results.toList()
+        }
+    }
 
     // search.js
     private suspend fun getGalleryIDsForQuery(
@@ -328,8 +346,9 @@ class Hitomi(
         // we know total number so avoid internal resize overhead
         val galleryIDs = LinkedHashSet<Int>(numberOfGalleryIDs, 1.0f)
 
-        for (i in 0.until(numberOfGalleryIDs))
+        for (i in 0.until(numberOfGalleryIDs)) {
             galleryIDs.add(buffer.int)
+        }
 
         return galleryIDs
     }
@@ -371,10 +390,11 @@ class Hitomi(
         }
 
         fun isLeaf(node: Node): Boolean {
-            for (subnode in node.subNodeAddresses)
+            for (subnode in node.subNodeAddresses) {
                 if (subnode != 0L) {
                     return false
                 }
+            }
 
             return true
         }
@@ -416,8 +436,9 @@ class Hitomi(
         // we know total number so avoid internal resize overhead
         val nozomi = LinkedHashSet<Int>(size, 1.0f)
 
-        while (arrayBuffer.hasRemaining())
+        while (arrayBuffer.hasRemaining()) {
             nozomi.add(arrayBuffer.int)
+        }
 
         return nozomi
     }
@@ -484,13 +505,9 @@ class Hitomi(
         return decodeNode(nodedata)
     }
 
-    private fun hashTerm(term: String): UByteArray {
-        return sha256(term.toByteArray()).copyOfRange(0, 4).toUByteArray()
-    }
+    private fun hashTerm(term: String): UByteArray = sha256(term.toByteArray()).copyOfRange(0, 4).toUByteArray()
 
-    private fun sha256(data: ByteArray): ByteArray {
-        return MessageDigest.getInstance("SHA-256").digest(data)
-    }
+    private fun sha256(data: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(data)
 
     private suspend fun Collection<Int>.toMangaList() = coroutineScope {
         map { id ->
@@ -545,49 +562,43 @@ class Hitomi(
         initialized = true
     }
 
-    override fun mangaDetailsRequest(manga: SManga): Request {
-        val id = manga.url
+    private fun galleryScriptUrl(url: String): String {
+        val id = url
             .substringAfterLast("-")
             .substringBefore(".")
 
-        return GET("$ltnUrl/galleries/$id.js", headers)
+        return "$ltnUrl/galleries/$id.js"
     }
 
-    override fun mangaDetailsParse(response: Response) = runBlocking {
-        response.parseScriptAs<Gallery>().toSManga()
+    private fun Gallery.toChapter() = SChapter.create().apply {
+        name = "Chapter"
+        url = galleryurl
+        scanlator = type
+        date_upload = dateFormat.tryParseDateTime(date.substringBeforeLast("-"))
     }
 
-    override fun getMangaUrl(manga: SManga) = baseUrl + manga.url
-
-    override fun chapterListRequest(manga: SManga) = mangaDetailsRequest(manga)
-
-    override fun chapterListParse(response: Response): List<SChapter> {
-        val gallery = response.parseScriptAs<Gallery>()
-
-        return listOf(
-            SChapter.create().apply {
-                name = "Chapter"
-                url = gallery.galleryurl
-                scanlator = gallery.type
-                date_upload = dateFormat.tryParse(gallery.date.substringBeforeLast("-"))
-            },
-        )
+    override suspend fun fetchMangaUpdate(
+        manga: SManga,
+        chapters: List<SChapter>,
+        fetchDetails: Boolean,
+        fetchChapters: Boolean,
+    ): SMangaUpdate {
+        val gallery = client.get(galleryScriptUrl(manga.url)).parseScriptAs<Gallery>()
+        val updatedManga = if (fetchDetails) gallery.toSManga().apply { url = manga.url } else manga
+        val updatedChapters = if (fetchChapters) listOf(gallery.toChapter()) else chapters
+        return SMangaUpdate(updatedManga, updatedChapters)
     }
 
-    private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ENGLISH)
-
-    override fun getChapterUrl(chapter: SChapter) = baseUrl + chapter.url
-
-    override fun pageListRequest(chapter: SChapter): Request {
-        val id = chapter.url
-            .substringAfterLast("-")
-            .substringBefore(".")
-
-        return GET("$ltnUrl/galleries/$id.js", headers)
+    override suspend fun getMangaByUrl(url: HttpUrl): SManga? {
+        if (url.host != baseUrl.toHttpUrl().host) return null
+        val gallery = client.get(galleryScriptUrl(url.encodedPath)).parseScriptAs<Gallery>()
+        return gallery.toSManga().apply { this.url = gallery.galleryurl }
     }
 
-    override fun pageListParse(response: Response): List<Page> {
-        val gallery = response.parseScriptAs<Gallery>()
+    private val dateFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.ENGLISH)
+
+    override suspend fun getPageList(chapter: SChapter): List<Page> {
+        val gallery = client.get(galleryScriptUrl(chapter.url)).parseScriptAs<Gallery>()
         val id = gallery.galleryurl
             .substringAfterLast("-")
             .substringBefore(".")
@@ -618,8 +629,7 @@ class Hitomi(
         return GET(page.imageUrl!!, imageHeaders)
     }
 
-    private inline fun <reified T> Response.parseScriptAs(): T =
-        parseAs<T> { it.substringAfter("var galleryinfo = ") }
+    private inline fun <reified T> Response.parseScriptAs(): T = parseAs<T> { it.substringAfter("var galleryinfo = ") }
 
     private inline fun <reified T> Response.parseAs(transform: (String) -> String = { body -> body }): T {
         val body = use { it.body.string() }
@@ -628,13 +638,12 @@ class Hitomi(
         return transformed.parseAs()
     }
 
-    private suspend fun Call.awaitSuccess() =
-        await().also {
-            require(it.isSuccessful) {
-                it.close()
-                "HTTP error ${it.code}"
-            }
+    private suspend fun Call.awaitSuccess() = await().also {
+        require(it.isSuccessful) {
+            it.close()
+            "HTTP error ${it.code}"
         }
+    }
 
     // ------------------ gg.js ------------------
     private var scriptLastRetrieval: Long? = null
@@ -683,9 +692,7 @@ class Hitomi(
     }
 
     // real_full_path_from_hash <-- common.js
-    private fun thumbPathFromHash(hash: String): String {
-        return hash.replace(Regex("""^.*(..)(.)$"""), "$2/$1")
-    }
+    private fun thumbPathFromHash(hash: String): String = hash.replace(Regex("""^.*(..)(.)$"""), "$2/$1")
 
     private fun imageUrlInterceptor(chain: Interceptor.Chain): Response {
         val request = chain.request()
@@ -726,14 +733,6 @@ class Hitomi(
 
         return chain.proceed(newRequest)
     }
-
-    override fun popularMangaParse(response: Response) = throw UnsupportedOperationException()
-    override fun popularMangaRequest(page: Int) = throw UnsupportedOperationException()
-    override fun latestUpdatesRequest(page: Int) = throw UnsupportedOperationException()
-    override fun latestUpdatesParse(response: Response) = throw UnsupportedOperationException()
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList) = throw UnsupportedOperationException()
-    override fun searchMangaParse(response: Response) = throw UnsupportedOperationException()
-    override fun imageUrlParse(response: Response) = throw UnsupportedOperationException()
 }
 
 const val IMAGE_LOOPBACK_HOST = "127.0.0.1"

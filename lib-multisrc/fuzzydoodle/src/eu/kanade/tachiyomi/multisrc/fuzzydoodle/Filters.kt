@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.multisrc.fuzzydoodle
 
 import eu.kanade.tachiyomi.source.model.Filter
+import kotlinx.serialization.Serializable
 import okhttp3.HttpUrl
 
 interface UrlPartFilter {
@@ -11,10 +12,11 @@ abstract class SelectFilter(
     name: String,
     private val options: List<Pair<String, String>>,
     private val urlParameter: String,
-) : UrlPartFilter, Filter.Select<String>(
+) : Filter.Select<String>(
     name,
     options.map { it.first }.toTypedArray(),
-) {
+),
+    UrlPartFilter {
     override fun addUrlParameter(url: HttpUrl.Builder) {
         url.addQueryParameter(urlParameter, options[state].second)
     }
@@ -26,10 +28,11 @@ abstract class CheckBoxGroup(
     name: String,
     options: List<Pair<String, String>>,
     private val urlParameter: String,
-) : UrlPartFilter, Filter.Group<CheckBoxFilter>(
+) : Filter.Group<CheckBoxFilter>(
     name,
     options.map { CheckBoxFilter(it.first, it.second) },
-) {
+),
+    UrlPartFilter {
     override fun addUrlParameter(url: HttpUrl.Builder) {
         state.filter { it.state }.forEach {
             url.addQueryParameter(urlParameter, it.value)
@@ -59,4 +62,11 @@ class GenreFilter(
     "Genres",
     options,
     "genre[]",
+)
+
+@Serializable
+class FilterData(
+    val types: List<Pair<String, String>>,
+    val statuses: List<Pair<String, String>>,
+    val genres: List<Pair<String, String>>,
 )

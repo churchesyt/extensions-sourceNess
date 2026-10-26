@@ -1,78 +1,100 @@
+@file:Suppress("SpellCheckingInspection")
+
 package eu.kanade.tachiyomi.multisrc.gattsu
 
-import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.online.ParsedHttpSource
-import eu.kanade.tachiyomi.util.asJsoup
+import eu.kanade.tachiyomi.source.model.SMangaUpdate
+import keiyoushi.network.get
+import keiyoushi.source.KeiSource
+import keiyoushi.utils.asJsoup
+import keiyoushi.utils.tryParseDate
 import okhttp3.Headers
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
-import java.text.ParseException
-import java.text.SimpleDateFormat
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-abstract class Gattsu(
-    override val name: String,
-    override val baseUrl: String,
-    override val lang: String,
-) : ParsedHttpSource() {
+abstract class Gattsu : KeiSource() {
 
-    override val supportsLatest = true
+    override fun Headers.Builder.configureHeaders(): Headers.Builder = set("Accept", ACCEPT)
+        .set("Accept-Language", ACCEPT_LANGUAGE)
 
-    override val client: OkHttpClient = network.cloudflareClient
+    // Website does not have a popular, so the latest listing is used instead.
+    override val supportsLatest = false
 
-    override fun headersBuilder() = Headers.Builder()
-        .add("Accept", ACCEPT)
-        .add("Accept-Language", ACCEPT_LANGUAGE)
-        .add("Referer", baseUrl)
+    override suspend fun getLatestUpdates(page: Int): MangasPage = throw UnsupportedOperationException()
 
-    // Website does not have a popular, so use latest instead.
-    override fun popularMangaRequest(page: Int): Request = latestUpdatesRequest(page)
-
-    override fun popularMangaSelector(): String = latestUpdatesSelector()
-
-    override fun popularMangaFromElement(element: Element): SManga = latestUpdatesFromElement(element)
-
-    override fun popularMangaNextPageSelector(): String? = latestUpdatesNextPageSelector()
-
-    override fun latestUpdatesRequest(page: Int): Request {
+    override suspend fun getPopularManga(page: Int): MangasPage {
         val path = if (page == 1) "" else "page/$page"
-        return GET("$baseUrl/$path", headers)
+        val document = client.get("$baseUrl/$path").asJsoup()
+        val mangas = document.select(latestUpdatesSelector()).map { element ->
+            latestUpdatesFromElement(element)
+        }
+        val hasNextPage = latestUpdatesNextPageSelector()?.let { selector ->
+            document.selectFirst(selector) != null
+        } ?: false
+
+        return MangasPage(mangas, hasNextPage)
     }
 
-    override fun latestUpdatesSelector() = "div.meio div.lista ul li a[href^=$baseUrl]"
+    open fun latestUpdatesSelector() = "div.meio div.lista ul li a[href^=$baseUrl]"
 
-    override fun latestUpdatesFromElement(element: Element): SManga = SManga.create().apply {
+    open fun latestUpdatesFromElement(element: Element): SManga = SManga.create().apply {
         title = element.select("span.thumb-titulo").first()!!.text()
         thumbnail_url = element.select("span.thumb-imagem img.wp-post-image").first()!!.attr("src")
         setUrlWithoutDomain(element.attr("href"))
     }
 
-    override fun latestUpdatesNextPageSelector(): String = "ul.paginacao li.next > a"
+    open fun latestUpdatesNextPageSelector(): String? = "ul.paginacao li.next > a"
 
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
+    override suspend fun getSearchMangaList(page: Int, query: String, filters: FilterList): MangasPage {
         val searchUrl = "$baseUrl/page/$page/".toHttpUrl().newBuilder()
             .addQueryParameter("s", query)
             .addQueryParameter("post_type", "post")
-            .toString()
+            .build()
 
-        return GET(searchUrl, headers)
+        val document = client.get(searchUrl).asJsoup()
+        val mangas = document.select(searchMangaSelector()).map { element ->
+            searchMangaFromElement(element)
+        }
+        val hasNextPage = searchMangaNextPageSelector()?.let { selector ->
+            document.selectFirst(selector) != null
+        } ?: false
+
+        return MangasPage(mangas, hasNextPage)
     }
 
-    override fun searchMangaSelector() = latestUpdatesSelector()
+    open fun searchMangaSelector() = latestUpdatesSelector()
 
-    override fun searchMangaFromElement(element: Element): SManga = latestUpdatesFromElement(element)
+    open fun searchMangaFromElement(element: Element): SManga = latestUpdatesFromElement(element)
 
-    override fun searchMangaNextPageSelector(): String = latestUpdatesNextPageSelector()
+    open fun searchMangaNextPageSelector(): String? = latestUpdatesNextPageSelector()
 
-    override fun mangaDetailsParse(document: Document): SManga = SManga.create().apply {
+    override suspend fun getMangaByUrl(url: HttpUrl): SManga? {
+        if (url.host != baseUrl.toHttpUrl().host || url.pathSegments.all(String::isEmpty)) return null
+
+        return mangaDetailsParse(client.get(url).asJsoup()).apply { setUrlWithoutDomain(url.toString()) }
+    }
+
+    // Details and chapters come from the same page
+    override suspend fun fetchMangaUpdate(
+        manga: SManga,
+        chapters: List<SChapter>,
+        fetchDetails: Boolean,
+        fetchChapters: Boolean,
+    ): SMangaUpdate {
+        val document = client.get(getMangaUrl(manga)).asJsoup()
+        return SMangaUpdate(mangaDetailsParse(document), chapterListParse(document))
+    }
+
+    open fun mangaDetailsParse(document: Document): SManga = SManga.create().apply {
         val postBox = document.select("div.meio div.post-box").first()!!
 
         title = postBox.select("h1.post-titulo").first()!!.text()
@@ -89,10 +111,8 @@ abstract class Gattsu(
             .withoutSize()
     }
 
-    override fun chapterListParse(response: Response): List<SChapter> {
-        val document = response.asJsoup()
-
-        if (document.select(pageListSelector()).firstOrNull() == null) {
+    open fun chapterListParse(document: Document): List<SChapter> {
+        if (document.selectFirst(pageListSelector()) == null) {
             return emptyList()
         }
 
@@ -100,9 +120,9 @@ abstract class Gattsu(
             .map { chapterFromElement(it) }
     }
 
-    override fun chapterListSelector() = "div.meio div.post-box:first-of-type"
+    open fun chapterListSelector() = "div.meio div.post-box:has(h1.post-titulo)"
 
-    override fun chapterFromElement(element: Element): SChapter = SChapter.create().apply {
+    open fun chapterFromElement(element: Element): SChapter = SChapter.create().apply {
         name = "Capítulo único"
         scanlator = element.select("ul.post-itens li:contains(Tradutor) a").firstOrNull()?.text()
         date_upload = element.ownerDocument()!!.select("meta[property=article:published_time]").firstOrNull()
@@ -112,42 +132,29 @@ abstract class Gattsu(
         setUrlWithoutDomain(element.ownerDocument()!!.location())
     }
 
-    protected open fun pageListSelector(): String =
-        "div.meio div.post-box ul.post-fotos li a > img, " +
-            "div.meio div.post-box.listaImagens div.galeriaHtml img"
+    protected open fun pageListSelector(): String = "div.meio div.post-box ul.post-fotos li a > img, " +
+        "div.meio div.post-box.listaImagens div.galeriaHtml img"
 
-    override fun pageListParse(document: Document): List<Page> {
+    override suspend fun getPageList(chapter: SChapter): List<Page> {
+        val document = client.get(getChapterUrl(chapter)).asJsoup()
         return document.select(pageListSelector())
             .mapIndexed { i, el ->
-                Page(i, document.location(), el.imgAttr().withoutSize())
+                Page(i, document.location(), imageUrl = el.imgAttr().withoutSize())
             }
     }
 
-    override fun imageUrlParse(document: Document) = ""
+    override fun imageRequest(page: Page): Request = super.imageRequest(page).newBuilder()
+        .header("Accept", ACCEPT_IMAGE)
+        .header("Referer", page.url)
+        .build()
 
-    override fun imageRequest(page: Page): Request {
-        val imageHeaders = headersBuilder()
-            .add("Accept", ACCEPT_IMAGE)
-            .add("Referer", page.url)
-            .build()
-
-        return GET(page.imageUrl!!, imageHeaders)
+    protected fun Element.imgAttr(): String = if (hasAttr("data-src")) {
+        attr("abs:data-src")
+    } else {
+        attr("abs:src")
     }
 
-    protected fun Element.imgAttr(): String =
-        if (hasAttr("data-src")) {
-            attr("abs:data-src")
-        } else {
-            attr("abs:src")
-        }
-
-    protected fun String.toDate(): Long {
-        return try {
-            DATE_FORMATTER.parse(this.substringBefore("T"))?.time ?: 0L
-        } catch (e: ParseException) {
-            0L
-        }
-    }
+    protected fun String.toDate(): Long = DATE_FORMATTER.tryParseDate(this.substringBefore("T"))
 
     protected fun String.withoutSize(): String = this.replace(THUMB_SIZE_REGEX, ".")
 
@@ -159,8 +166,6 @@ abstract class Gattsu(
 
         private val THUMB_SIZE_REGEX = "-\\d+x\\d+\\.".toRegex()
 
-        private val DATE_FORMATTER by lazy {
-            SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
-        }
+        private val DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.ENGLISH)
     }
 }

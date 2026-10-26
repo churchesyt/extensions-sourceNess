@@ -18,21 +18,20 @@ internal class Paginator<T>(
 
 /** Page model schema. */
 @Serializable
-internal data class MAPage(
+internal class MAPage(
     private val id: Int,
     val image: String,
     val number: Int,
     val url: String,
 ) {
-    override fun equals(other: Any?) =
-        this === other || other is MAPage && id == other.id
+    override fun equals(other: Any?) = ((this === other) || ((other is MAPage) && id == other.id))
 
     override fun hashCode() = id
 }
 
 /** Chapter model schema. */
 @Serializable
-internal data class Chapter(
+internal class Chapter(
     val id: Int,
     val title: String,
     val number: Float,
@@ -43,15 +42,14 @@ internal data class Chapter(
     val groups: List<String>,
     @SerialName("full_title") val fullTitle: String,
 ) {
-    override fun equals(other: Any?) =
-        this === other || other is Chapter && id == other.id
+    override fun equals(other: Any?) = (this === other) || ((other is Chapter) && (id == other.id))
 
     override fun hashCode() = id
 }
 
 /** Series model schema. */
 @Serializable
-internal data class Series(
+internal class Series(
     val slug: String,
     val title: String,
     val cover: String,
@@ -63,8 +61,7 @@ internal data class Series(
     val artists: List<String>? = null,
     val categories: List<String>? = null,
 ) {
-    override fun equals(other: Any?) =
-        this === other || other is Series && slug == other.slug
+    override fun equals(other: Any?) = (this === other) || ((other is Series) && slug == other.slug)
 
     override fun hashCode() = slug.hashCode()
 }

@@ -1,56 +1,52 @@
 package eu.kanade.tachiyomi.multisrc.mccms
 
-import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.network.interceptor.rateLimitHost
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.online.HttpSource
-import eu.kanade.tachiyomi.util.asJsoup
+import eu.kanade.tachiyomi.source.model.SMangaUpdate
+import keiyoushi.network.get
+import keiyoushi.network.rateLimit
+import keiyoushi.source.KeiSource
+import keiyoushi.utils.asJsoup
+import keiyoushi.utils.parseAs
+import keiyoushi.utils.toJsonElement
+import kotlinx.serialization.json.JsonElement
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.Request
+import okhttp3.OkHttpClient
 import okhttp3.Response
 import okio.IOException
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import org.jsoup.select.Evaluator
-import rx.Observable
 
-open class MCCMSWeb(
-    override val name: String,
-    override val baseUrl: String,
-    final override val lang: String = "zh",
-    protected val config: MCCMSConfig = MCCMSConfig(),
-) : HttpSource() {
-    override val supportsLatest get() = true
+abstract class MCCMSWeb : KeiSource() {
+
+    protected open val config: MCCMSConfig = MCCMSConfig()
 
     init {
         Intl.lang = lang
     }
 
-    override val client by lazy {
-        network.cloudflareClient.newBuilder()
-            .rateLimitHost(baseUrl.toHttpUrl(), 2)
-            .addInterceptor { chain ->
-                val response = chain.proceed(chain.request())
-                if (response.request.url.encodedPath == "/err/comic") {
-                    throw IOException(response.body.string().substringBefore('\n'))
-                }
-                response
-            }
-            .build()
+    override fun OkHttpClient.Builder.configureClient() = addInterceptor { chain ->
+        val response = chain.proceed(chain.request())
+        if (response.request.url.encodedPath == "/err/comic") {
+            throw IOException(response.body.string().substringBefore('\n'))
+        }
+        response
     }
+        .rateLimit(2) { it.host == baseUrl.toHttpUrl().host }
 
-    override fun headersBuilder() = Headers.Builder()
-        .add("User-Agent", System.getProperty("http.agent")!!)
+    override fun Headers.Builder.configureHeaders() = set("User-Agent", System.getProperty("http.agent")!!)
+        .removeAll("Referer")
+        .removeAll("Origin")
 
     open fun parseListing(document: Document): MangasPage {
-        parseGenres(document, config.genreData)
         val mangas = document.select(simpleMangaSelector()).map(::simpleMangaFromElement)
-        val hasNextPage = run { // default pagination
+        val hasNextPage = run {
+            // default pagination
             val buttons = document.selectFirst("#Pagination, .NewPages")!!.select(Evaluator.Tag("a"))
             val count = buttons.size
             // Next page != Last page
@@ -68,36 +64,33 @@ open class MCCMSWeb(
         thumbnail_url = element.selectFirst(Evaluator.Tag("img"))!!.attr("data-original")
     }
 
-    override fun popularMangaRequest(page: Int) = GET("$baseUrl/category/order/hits/page/$page", pcHeaders)
+    override suspend fun getPopularManga(page: Int) = parseListing(client.get("$baseUrl/category/order/hits/page/$page", pcHeaders).asJsoup())
 
-    override fun popularMangaParse(response: Response) = parseListing(response.asJsoup())
+    override suspend fun getLatestUpdates(page: Int) = parseListing(client.get("$baseUrl/category/order/addtime/page/$page", pcHeaders).asJsoup())
 
-    override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/category/order/addtime/page/$page", pcHeaders)
+    protected open val searchHeaders: Headers get() = pcHeaders
 
-    override fun latestUpdatesParse(response: Response) = parseListing(response.asJsoup())
-
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList) =
-        if (query.isNotBlank()) {
-            val url = if (config.textSearchOnlyPageOne) {
+    override suspend fun getSearchMangaList(page: Int, query: String, filters: FilterList): MangasPage {
+        val url = if (query.isNotBlank()) {
+            if (config.textSearchOnlyPageOne) {
                 "$baseUrl/search".toHttpUrl().newBuilder()
                     .addQueryParameter("key", query)
                     .toString()
             } else {
                 "$baseUrl/search/$query/$page"
             }
-            GET(url, pcHeaders)
         } else {
-            val url = buildString {
+            buildString {
                 append(baseUrl).append("/category/")
                 filters.filterIsInstance<MCCMSFilter>().map { it.query }.filter { it.isNotEmpty() }
                     .joinTo(this, "/")
                 append("/page/").append(page)
             }
-            GET(url, pcHeaders)
         }
+        return searchMangaParse(client.get(url, searchHeaders).asJsoup())
+    }
 
-    override fun searchMangaParse(response: Response): MangasPage {
-        val document = response.asJsoup()
+    protected open fun searchMangaParse(document: Document): MangasPage {
         if (document.selectFirst(Evaluator.Id("code-div")) != null) {
             val manga = SManga.create().apply {
                 url = "/search"
@@ -114,46 +107,40 @@ open class MCCMSWeb(
         return result
     }
 
-    override fun fetchMangaDetails(manga: SManga): Observable<SManga> {
-        if (manga.url == "/search") return Observable.just(manga)
-        return super.fetchMangaDetails(manga)
-    }
-
     override fun getMangaUrl(manga: SManga) = baseUrl.mobileUrl() + manga.url
 
-    override fun mangaDetailsRequest(manga: SManga) = GET(baseUrl + manga.url, pcHeaders)
+    // details and chapters come from the same page
+    override suspend fun fetchMangaUpdate(
+        manga: SManga,
+        chapters: List<SChapter>,
+        fetchDetails: Boolean,
+        fetchChapters: Boolean,
+    ): SMangaUpdate {
+        if (manga.url == "/search") return SMangaUpdate(manga, emptyList())
+        val document = fetchMangaPage(manga)
+        return SMangaUpdate(mangaDetailsParse(document), chapterListParse(document))
+    }
 
-    override fun mangaDetailsParse(response: Response): SManga {
-        return run {
-            SManga.create().apply {
-                val document = response.asJsoup().selectFirst(Evaluator.Class("de-info__box"))!!
-                title = document.selectFirst(Evaluator.Class("comic-title"))!!.ownText()
-                thumbnail_url = document.selectFirst(Evaluator.Tag("img"))!!.attr("src")
-                author = document.selectFirst(Evaluator.Class("name"))!!.text()
-                genre = document.selectFirst(Evaluator.Class("comic-status"))!!.select(Evaluator.Tag("a")).joinToString { it.ownText() }
-                description = document.selectFirst(Evaluator.Class("intro-total"))!!.text()
+    protected open suspend fun fetchMangaPage(manga: SManga): Document = client.get(baseUrl + manga.url, pcHeaders).asJsoup()
+
+    protected open fun mangaDetailsParse(document: Document): SManga = SManga.create().apply {
+        val element = document.selectFirst(Evaluator.Class("de-info__box"))!!
+        title = element.selectFirst(Evaluator.Class("comic-title"))!!.ownText()
+        thumbnail_url = element.selectFirst(Evaluator.Tag("img"))!!.attr("src")
+        author = element.selectFirst(Evaluator.Class("name"))!!.text()
+        genre = element.selectFirst(Evaluator.Class("comic-status"))!!.select(Evaluator.Tag("a")).joinToString { it.ownText() }
+        description = element.selectFirst(Evaluator.Class("intro-total"))!!.text()
+    }
+
+    protected open fun chapterListParse(document: Document): List<SChapter> = getDescendingChapters(
+        document.select(chapterListSelector()).map {
+            val link = it.child(0)
+            SChapter.create().apply {
+                url = link.attr("href").removePathPrefix()
+                name = link.text()
             }
-        }
-    }
-
-    override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> {
-        if (manga.url == "/search") return Observable.just(emptyList())
-        return super.fetchChapterList(manga)
-    }
-
-    override fun chapterListRequest(manga: SManga) = GET(baseUrl + manga.url, pcHeaders)
-
-    override fun chapterListParse(response: Response): List<SChapter> {
-        return getDescendingChapters(
-            response.asJsoup().select(chapterListSelector()).map {
-                val link = it.child(0)
-                SChapter.create().apply {
-                    url = link.attr("href").removePathPrefix()
-                    name = link.text()
-                }
-            },
-        )
-    }
+        },
+    )
 
     open fun chapterListSelector() = ".chapter__list-box > li"
 
@@ -161,18 +148,18 @@ open class MCCMSWeb(
 
     override fun getChapterUrl(chapter: SChapter) = baseUrl.mobileUrl() + chapter.url
 
-    override fun pageListRequest(chapter: SChapter): Request =
-        GET(baseUrl + chapter.url, if (config.useMobilePageList) headers else pcHeaders)
+    override suspend fun getPageList(chapter: SChapter): List<Page> = pageListParse(client.get(baseUrl + chapter.url, if (config.useMobilePageList) headers else pcHeaders))
 
-    override fun pageListParse(response: Response) = config.pageListParse(response)
-
-    override fun imageUrlParse(response: Response) = throw UnsupportedOperationException()
+    protected open fun pageListParse(response: Response): List<Page> = config.pageListParse(response)
 
     // Don't send referer
-    override fun imageRequest(page: Page) = GET(page.imageUrl!!, pcHeaders)
+    override fun imageRequest(page: Page) = super.imageRequest(page).newBuilder().headers(pcHeaders).build()
 
-    override fun getFilterList(): FilterList {
-        val genreData = config.genreData
-        return getWebFilters(genreData)
-    }
+    override val supportsFilterFetching get() = config.hasCategoryPage
+
+    override suspend fun fetchFilterData(): JsonElement = parseGenres(fetchGenresPage()).toJsonElement()
+
+    protected open suspend fun fetchGenresPage(): Document = client.get("$baseUrl/category/", pcHeaders).asJsoup()
+
+    override fun getFilterList(data: JsonElement?): FilterList = getWebFilters(data?.parseAs<List<Pair<String, String>>>())
 }

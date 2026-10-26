@@ -1,5 +1,16 @@
 plugins {
-    id("lib-multisrc")
+    alias(kei.plugins.multisrc)
 }
 
-baseVersionCode = 12
+dependencies {
+    api(project(":lib:i18n"))
+}
+
+keiyoushi {
+    baseVersionCode = 28
+    libVersion = "1.6"
+
+    deeplink {
+        path("/.*/..*")
+    }
+}

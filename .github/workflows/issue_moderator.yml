@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Moderate issues
-        uses: keiyoushi/issue-moderator-action@c1bae1cf6fd33c272b88505c8bfa0a97b7761eb3
+        uses: keiyoushi/issue-moderator-action@b49f33365ea20bde3b96d3aebac85ba89466e185
         with:
           repo-token: ${{ github.token }}
           member-token: ${{ secrets.MEMBER_TOKEN }}
@@ -40,7 +40,10 @@ jobs:
           existing-check-enabled: true
           existing-check-labels: |
             ["Source request", "Domain changed"]
-          existing-check-repo-url: https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json
+          existing-check-repo-url: https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.json
+
+          url-search-sections: |
+            ["Source link", "Source new URL"]
 
           auto-close-rules: |
             [
@@ -53,21 +56,21 @@ jobs:
               },
               {
                 "type": "both",
-                "regex": "remanga\\.org",
+                "regex": "\\b(remanga\\.org|nhentai(\\.net)?|e([x-])?hentai(\\.org)?|hitomi\\.la|pururin(\\.me)?|hentai2read(\\.com)?|hentai20\\.io)\\b",
                 "ignoreCase": true,
                 "labels": ["invalid"],
-                "message": "ReManga (Russian) will not be added back as it has been removed [due to legal reasons](https://github.com/github/dmca)."
+                "message": "{match} will not be added back as it has been removed [due to legal reasons](https://github.com/github/dmca).\nThis was also mentioned in #14260, which is pinned on the Issues page. Search the existing requests first & don't acknowledge that you searched when you clearly didn't."
               },
               {
                 "type": "both",
-                "regex": "(kumanga\\.com)",
+                "regex": "\\b(kumanga\\.com|sakuramangas\\.org)\\b",
                 "ignoreCase": true,
                 "labels": ["invalid"],
-                "message": "{match} will not be added back as it is too difficult to maintain."
+                "message": "{match} will not be added back as it is too difficult to maintain.\nThis was also mentioned in #14260, which is pinned on the Issues page. Search the existing requests first & don't acknowledge that you searched when you clearly didn't."
               },
               {
                 "type": "both",
-                "regex": "(centralnovel\\.com)",
+                "regex": "\\b(centralnovel\\.com)\\b",
                 "ignoreCase": true,
                 "labels": ["invalid"],
                 "message": "Novels aren't supported"

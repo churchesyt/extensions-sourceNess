@@ -1,9 +1,11 @@
 package eu.kanade.tachiyomi.multisrc.galleryadults
 
+import keiyoushi.utils.tryParse
+import keiyoushi.utils.tryParseDate
 import org.jsoup.nodes.Element
-import java.text.ParseException
-import java.text.SimpleDateFormat
+import java.time.format.DateTimeFormatter
 import java.util.Calendar
+import kotlin.time.Instant
 
 // any space except after a comma (we're going to replace spaces only between words)
 val regexSpaceNotAfterComma = Regex("""(?<!,)\s+""")
@@ -11,7 +13,6 @@ val regexSpaceNotAfterComma = Regex("""(?<!,)\s+""")
 // extract preceding minus (-) and term
 val regexExcludeTerm = Regex("""^(-?)"?(.+)"?""")
 
-val regexTagCountNumber = Regex("\\([0-9,]*\\)")
 val regexDateSuffix = Regex("""\d(st|nd|rd|th)""")
 val regexDate = Regex("""\d\D\D""")
 val regexNotNumber = Regex("""\D""")
@@ -25,19 +26,16 @@ fun Element.imgAttr() = when {
     else -> absUrl("src")
 }
 
-fun Element.cleanTag(): String = text().cleanTag()
-fun String.cleanTag(): String = replace(regexTagCountNumber, "").trim()
-
 // convert thumbnail URLs to full image URLs
 fun String.thumbnailToFull(): String {
     val ext = substringAfterLast(".")
     return replace("t.$ext", ".$ext")
 }
 
-fun String?.toDate(simpleDateFormat: SimpleDateFormat?): Long {
+fun String?.toDate(formatter: DateTimeFormatter?): Long {
     this ?: return 0L
 
-    return if (simpleDateFormat != null) {
+    return if (formatter != null) {
         if (contains(regexDateSuffix)) {
             // Clean date (e.g. 5th December 2019 to 5 December 2019) before parsing it
             split(" ").map {
@@ -47,17 +45,18 @@ fun String?.toDate(simpleDateFormat: SimpleDateFormat?): Long {
                     it
                 }
             }
-                .let { simpleDateFormat.tryParse(it.joinToString(" ")) }
+                .let { formatter.tryParseDate(it.joinToString(" ")) }
         } else {
-            simpleDateFormat.tryParse(this)
+            formatter.tryParseDate(this)
         }
     } else {
         parseDate(this)
     }
 }
 
-private fun parseDate(date: String?): Long {
-    date ?: return 0L
+private fun parseDate(date: String): Long {
+    val parsed = Instant.tryParse(date)
+    if (parsed != 0L) return parsed
 
     return when {
         // Handle 'yesterday' and 'today', using midnight
@@ -70,6 +69,7 @@ private fun parseDate(date: String?): Long {
                 set(Calendar.MILLISECOND, 0)
             }.timeInMillis
         }
+
         WordSet("today", "just now").startsWith(date) -> {
             Calendar.getInstance().apply {
                 set(Calendar.HOUR_OF_DAY, 0)
@@ -78,6 +78,7 @@ private fun parseDate(date: String?): Long {
                 set(Calendar.MILLISECOND, 0)
             }.timeInMillis
         }
+
         WordSet("يومين").startsWith(date) -> {
             Calendar.getInstance().apply {
                 add(Calendar.DAY_OF_MONTH, -2) // day before yesterday
@@ -87,12 +88,15 @@ private fun parseDate(date: String?): Long {
                 set(Calendar.MILLISECOND, 0)
             }.timeInMillis
         }
+
         WordSet("ago", "atrás", "önce", "قبل").endsWith(date) -> {
             parseRelativeDate(date)
         }
+
         WordSet("hace").startsWith(date) -> {
             parseRelativeDate(date)
         }
+
         else -> 0L
     }
 }
@@ -111,27 +115,26 @@ private fun parseRelativeDate(date: String): Long {
     return when {
         WordSet("detik", "segundo", "second", "วินาที").anyWordIn(date) ->
             now.apply { add(Calendar.SECOND, -number) }.timeInMillis
+
         WordSet("menit", "dakika", "min", "minute", "minuto", "นาที", "دقائق").anyWordIn(date) ->
             now.apply { add(Calendar.MINUTE, -number) }.timeInMillis
+
         WordSet("jam", "saat", "heure", "hora", "hour", "ชั่วโมง", "giờ", "ore", "ساعة", "小时").anyWordIn(date) ->
             now.apply { add(Calendar.HOUR, -number) }.timeInMillis
+
         WordSet("hari", "gün", "jour", "día", "dia", "day", "วัน", "ngày", "giorni", "أيام", "天").anyWordIn(date) ->
             now.apply { add(Calendar.DAY_OF_MONTH, -number) }.timeInMillis
+
         WordSet("week", "semana").anyWordIn(date) ->
             now.apply { add(Calendar.DAY_OF_MONTH, -number * 7) }.timeInMillis
+
         WordSet("month", "mes").anyWordIn(date) ->
             now.apply { add(Calendar.MONTH, -number) }.timeInMillis
+
         WordSet("year", "año").anyWordIn(date) ->
             now.apply { add(Calendar.YEAR, -number) }.timeInMillis
-        else -> 0L
-    }
-}
 
-private fun SimpleDateFormat.tryParse(string: String): Long {
-    return try {
-        parse(string)?.time ?: 0L
-    } catch (_: ParseException) {
-        0L
+        else -> 0L
     }
 }
 
