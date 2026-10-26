@@ -43,7 +43,7 @@ class TMOHentai : ConfigurableSource, ParsedHttpSource() {
 
     private val preferences: SharedPreferences by getPreferencesLazy()
 
-    override fun popularMangaRequest(page: Int) = GET("$baseUrl/biblioteca?order_by=views&order_dir=desc&page=$page", headers)
+    override fun popularMangaRequest(page: Int) = GET("$baseUrl/biblioteca?order_item=likes_count&order_dir=desc&page=$page", headers)
 
     override fun popularMangaSelector() = ".manga-card, .work-thumbnail"
 
@@ -78,9 +78,9 @@ class TMOHentai : ConfigurableSource, ParsedHttpSource() {
 
     override fun popularMangaNextPageSelector() = "a[rel=next]"
 
-    override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/biblioteca?order_by=publication_date&order_dir=desc&page=$page", headers)
+    override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/biblioteca?order_item=creation&order_dir=desc&page=$page", headers)
 
-    override fun latestUpdatesSelector() = ".work-thumbnail"
+    override fun latestUpdatesSelector() = popularMangaSelector()
 
     override fun latestUpdatesFromElement(element: Element) = popularMangaFromElement(element)
 
@@ -88,25 +88,38 @@ class TMOHentai : ConfigurableSource, ParsedHttpSource() {
 
     override fun mangaDetailsParse(document: Document) = SManga.create().apply {
         title = (
-            document.selectFirst("h3")?.text()?.trim()?.ifBlank { null }
+            document.selectFirst("#md-title")?.text()?.trim()?.ifBlank { null }
+                ?: document.selectFirst("h3")?.text()?.trim()?.ifBlank { null }
                 ?: document.selectFirst("h1, h2")?.text()?.trim()?.ifBlank { null }
                 ?: document.title().substringBefore("—").substringBefore("|").trim().ifBlank { null }
                 ?: "TMOHentai"
             )
         url = document.baseUri().removePrefix(baseUrl).trim().ifBlank { "/" }
         thumbnail_url = (
-            document.selectFirst("img.content-thumbnail-cover")?.attr("abs:src")?.ifBlank { null }
+            document.selectFirst("#md-cover")?.attr("abs:src")?.ifBlank { null }
+                ?: document.selectFirst(".md-cover-card img")?.attr("abs:src")?.ifBlank { null }
+                ?: document.selectFirst("img.content-thumbnail-cover")?.attr("abs:src")?.ifBlank { null }
                 ?: document.selectFirst("img[alt='cover']")?.attr("abs:src")?.ifBlank { null }
                 ?: document.selectFirst("meta[property=og:image]")?.attr("content")?.ifBlank { null }
                 ?: "https://via.placeholder.com/150"
             )
         description = (
-            document.selectFirst("h5:containsOwn(Sinopsis)")?.parent()?.selectFirst("p")?.text()?.trim()?.ifBlank { null }
+            document.selectFirst(".md-info-row--synopsis .md-info-row__value")?.text()?.trim()?.ifBlank { null }
+                ?: document.selectFirst("h5:containsOwn(Sinopsis)")?.parent()?.selectFirst("p")?.text()?.trim()?.ifBlank { null }
                 ?: document.selectFirst("p")?.text()?.trim()?.ifBlank { null }
                 ?: "Sin descripción"
             )
-        status = if (document.text().contains("Status Ongoing", ignoreCase = true)) SManga.ONGOING else SManga.UNKNOWN
-        val genreList = document.select("a[href*='/biblioteca?type='], a[href*='/biblioteca?tag=']").eachText().joinToString()
+        status = if (
+            document.selectFirst(".md-cover-card__status")?.text()?.contains("Ongoing", ignoreCase = true) == true ||
+            document.text().contains("Status Ongoing", ignoreCase = true)
+        ) {
+            SManga.ONGOING
+        } else {
+            SManga.UNKNOWN
+        }
+        val genreList = document.select("#md-tags-list a, a[href*='/biblioteca?type='], a[href*='/biblioteca?tag=']")
+            .eachText()
+            .joinToString()
         if (genreList.isNotBlank()) {
             genre = genreList
         }
