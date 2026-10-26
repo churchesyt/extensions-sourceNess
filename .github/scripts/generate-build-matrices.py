@@ -52,6 +52,16 @@ def resolve_module_suffix(ref: str, lang: str, extension: str) -> str:
     return f"{lang}.{extension}"
 
 
+def has_previous_kotlin_dsl_build(ref: str, lang: str, extension: str) -> bool:
+    build_file = f"src/{lang}/{extension}/build.gradle.kts"
+    result = subprocess.run(
+        ["git", "cat-file", "-e", f"{ref}:{build_file}"],
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def resolve_dependent_libs(libs: set[str]) -> set[str]:
     """
     returns all libs which depend on any of the passed libs (/lib),
@@ -170,9 +180,13 @@ def get_module_list(ref: str) -> tuple[list[str], list[str], list[str], bool]:
         elif match := EXTENSION_REGEX.search(file):
             lang = match.group("lang")
             extension = match.group("extension")
-            if Path("src", lang, extension).is_dir():
-                modules.add(f':src:{lang}:{extension}')
-            deleted.add(resolve_module_suffix(ref, lang, extension))
+            module_dir = Path("src", lang, extension)
+            if module_dir.is_dir():
+                if (module_dir / "build.gradle.kts").is_file():
+                    modules.add(f":src:{lang}:{extension}")
+                    deleted.add(resolve_module_suffix(ref, lang, extension))
+            elif has_previous_kotlin_dsl_build(ref, lang, extension):
+                deleted.add(resolve_module_suffix(ref, lang, extension))
 
         elif match := MULTISRC_LIB_REGEX.search(file):
             multisrc = match.group("multisrc")
@@ -220,6 +234,8 @@ def get_all_modules(ref: str) -> tuple[list[str], list[str]]:
     deleted = []
     for lang in Path("src").iterdir():
         for extension in lang.iterdir():
+            if not (extension / "build.gradle.kts").is_file():
+                continue
             modules.append(f":src:{lang.name}:{extension.name}")
             deleted.append(resolve_module_suffix(ref, lang.name, extension.name))
     return modules, deleted

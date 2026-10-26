@@ -101,7 +101,7 @@ jobs:
           done
 
           # One extension, so that what only extension builds need is cached too
-          extension=$(find src -mindepth 2 -maxdepth 2 -type d | sort | head -n 1)
+          extension=$(find src -mindepth 3 -maxdepth 3 -type f -name 'build.gradle.kts' -printf '%h\n' | sort | head -n 1)
           MODULES+=(":${extension//\//:}")
 
           TASKS=()
