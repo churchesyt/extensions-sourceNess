@@ -17650,6 +17650,23 @@
     ]
   },
   {
+    "name": "Tachiyomi: LectorHentai",
+    "pkg": "eu.kanade.tachiyomi.extension.es.lectorhentai",
+    "apk": "tachiyomi-es.lectorhentai-v1.6.0.apk",
+    "lang": "es",
+    "code": 106000,
+    "version": "1.6.0",
+    "nsfw": 1,
+    "sources": [
+      {
+        "name": "LectorHentai",
+        "lang": "es",
+        "id": "6380561484779020723",
+        "baseUrl": "https://lectorhentai.com"
+      }
+    ]
+  },
+  {
     "name": "Tachiyomi: LectorJPG(Ness)",
     "pkg": "eu.kanade.tachiyomi.extension.es.lectorjpg",
     "apk": "tachiyomi-es.lectorjpg-v1.4.44.apk",
