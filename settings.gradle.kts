@@ -33,14 +33,17 @@ rootProject.name = "Keiyoushi"
 /**
  * Add or remove modules to load as needed for local development here.
  */
-// loadAllIndividualExtensions()
-loadIndividualExtension("all", "hitomi")
-loadIndividualExtension("all", "nhentai")
-loadIndividualExtension("all", "pururin")
-loadIndividualExtension("en", "hentai20")
-loadIndividualExtension("en", "hentai2read")
-loadIndividualExtension("es", "aedex")
-loadIndividualExtension("en", "templescan")
+if (providers.environmentVariable("CI").orNull == "true") {
+    loadAllIndividualExtensions()
+} else {
+    loadIndividualExtension("all", "hitomi")
+    loadIndividualExtension("all", "nhentai")
+    loadIndividualExtension("all", "pururin")
+    loadIndividualExtension("en", "hentai20")
+    loadIndividualExtension("en", "hentai2read")
+    loadIndividualExtension("es", "aedex")
+    loadIndividualExtension("en", "templescan")
+}
 
 /**
  * ===================================== COMMON CONFIGURATION ======================================
@@ -60,7 +63,9 @@ File(rootDir, "lib-multisrc").eachDir { include("lib-multisrc:${it.name}") }
 fun loadAllIndividualExtensions() {
     File(rootDir, "src").eachDir { dir ->
         dir.eachDir { subdir ->
-            include("src:${dir.name}:${subdir.name}")
+            if (subdir.resolve("build.gradle.kts").isFile) {
+                include("src:${dir.name}:${subdir.name}")
+            }
         }
     }
 }
