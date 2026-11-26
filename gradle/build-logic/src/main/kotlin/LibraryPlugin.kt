@@ -1,4 +1,5 @@
 import com.android.build.api.dsl.LibraryExtension
+import io.github.keiyoushi.gradle.internal.configureRuntimeConsumer
 import io.github.keiyoushi.gradle.internal.extensions.alias
 import io.github.keiyoushi.gradle.internal.extensions.compileOnly
 import io.github.keiyoushi.gradle.internal.extensions.implementation
@@ -21,8 +22,11 @@ class LibraryPlugin : Plugin<Project> {
             alias(kei.plugins.spotless)
         }
 
+        val namespace = "keiyoushi.lib.${project.name}"
+        configureRuntimeConsumer(provider { namespace })
+
         android {
-            namespace = "keiyoushi.lib.${project.name}"
+            this.namespace = namespace
 
             sourceSets {
                 named("main") {

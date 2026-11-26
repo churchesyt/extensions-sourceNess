@@ -32,20 +32,14 @@ suspend fun OkHttpClient.get(
     headers: Headers,
     cacheControl: CacheControl = DEFAULT_CACHE_CONTROL,
     ensureSuccess: Boolean = true,
-): Response {
-    val request = Request.Builder()
+): Response = call(
+    Request.Builder()
         .url(url)
         .headers(headers)
         .cacheControl(cacheControl)
-        .build()
-    val call = newCall(request)
-
-    return if (ensureSuccess) {
-        call.awaitSuccess()
-    } else {
-        call.await()
-    }
-}
+        .build(),
+    ensureSuccess,
+)
 
 /**
  * Executes a GET request asynchronously using a URL string and returns the response.
@@ -109,20 +103,14 @@ suspend fun OkHttpClient.post(
     headers: Headers,
     body: RequestBody,
     ensureSuccess: Boolean = true,
-): Response {
-    val request = Request.Builder()
+): Response = call(
+    Request.Builder()
         .url(url)
         .headers(headers)
         .post(body)
-        .build()
-    val call = newCall(request)
-
-    return if (ensureSuccess) {
-        call.awaitSuccess()
-    } else {
-        call.await()
-    }
-}
+        .build(),
+    ensureSuccess,
+)
 
 /**
  * Executes a POST request asynchronously using a URL string and returns the response.
@@ -173,6 +161,184 @@ suspend fun OkHttpClient.post(
 ): Response = post(url, source.headers, body, ensureSuccess)
 
 /**
+ * Executes a GET request asynchronously the way a browser would make it, and returns the response.
+ *
+ * @param url The [HttpUrl] to request.
+ * @param headers The headers to include in the request.
+ * @param fetch How a browser would make the request, see [Fetch].
+ * @param cacheControl The cache control settings for the request.
+ * @param ensureSuccess If true, throws an exception if the response code is not 2xx.
+ * @return The HTTP [Response].
+ */
+suspend fun OkHttpClient.get(
+    url: HttpUrl,
+    headers: Headers,
+    fetch: Fetch,
+    cacheControl: CacheControl = DEFAULT_CACHE_CONTROL,
+    ensureSuccess: Boolean = true,
+): Response = call(
+    Request.Builder()
+        .url(url)
+        .headers(headers)
+        .cacheControl(cacheControl)
+        .fetch(fetch)
+        .build(),
+    ensureSuccess,
+)
+
+/**
+ * Executes a GET request asynchronously using a URL string the way a browser would make it, and returns the response.
+ *
+ * @param url The URL string to request.
+ * @param headers The headers to include in the request.
+ * @param fetch How a browser would make the request, see [Fetch].
+ * @param cacheControl The cache control settings for the request.
+ * @param ensureSuccess If true, throws an exception if the response code is not 2xx.
+ * @return The HTTP [Response].
+ */
+suspend fun OkHttpClient.get(
+    url: String,
+    headers: Headers,
+    fetch: Fetch,
+    cacheControl: CacheControl = DEFAULT_CACHE_CONTROL,
+    ensureSuccess: Boolean = true,
+): Response = get(url.toHttpUrl(), headers, fetch, cacheControl, ensureSuccess)
+
+/**
+ * Executes a GET request asynchronously the way a browser would make it, automatically retrieving the headers from
+ * the current [HttpSource] context receiver.
+ *
+ * @param url The [HttpUrl] to request.
+ * @param fetch How a browser would make the request, see [Fetch].
+ * @param cacheControl The cache control settings for the request.
+ * @param ensureSuccess If true, throws an exception if the response code is not 2xx.
+ * @return The HTTP [Response].
+ */
+context(source: HttpSource)
+suspend fun OkHttpClient.get(
+    url: HttpUrl,
+    fetch: Fetch,
+    cacheControl: CacheControl = DEFAULT_CACHE_CONTROL,
+    ensureSuccess: Boolean = true,
+): Response = get(url, source.headers, fetch, cacheControl, ensureSuccess)
+
+/**
+ * Executes a GET request asynchronously using a URL string the way a browser would make it, automatically retrieving
+ * the headers from the current [HttpSource] context receiver.
+ *
+ * @param url The URL string to request.
+ * @param fetch How a browser would make the request, see [Fetch].
+ * @param cacheControl The cache control settings for the request.
+ * @param ensureSuccess If true, throws an exception if the response code is not 2xx.
+ * @return The HTTP [Response].
+ */
+context(source: HttpSource)
+suspend fun OkHttpClient.get(
+    url: String,
+    fetch: Fetch,
+    cacheControl: CacheControl = DEFAULT_CACHE_CONTROL,
+    ensureSuccess: Boolean = true,
+): Response = get(url.toHttpUrl(), source.headers, fetch, cacheControl, ensureSuccess)
+
+/**
+ * Executes a POST request asynchronously the way a browser would make it, and returns the response.
+ *
+ * @param url The [HttpUrl] to request.
+ * @param headers The headers to include in the request.
+ * @param fetch How a browser would make the request, see [Fetch].
+ * @param body The request body payload.
+ * @param ensureSuccess If true, throws an exception if the response code is not 2xx.
+ * @return The HTTP [Response].
+ */
+suspend fun OkHttpClient.post(
+    url: HttpUrl,
+    headers: Headers,
+    fetch: Fetch,
+    body: RequestBody,
+    ensureSuccess: Boolean = true,
+): Response = call(
+    Request.Builder()
+        .url(url)
+        .headers(headers)
+        .post(body)
+        .fetch(fetch)
+        .build(),
+    ensureSuccess,
+)
+
+/**
+ * Executes a POST request asynchronously using a URL string the way a browser would make it, and returns the
+ * response.
+ *
+ * @param url The URL string to request.
+ * @param headers The headers to include in the request.
+ * @param fetch How a browser would make the request, see [Fetch].
+ * @param body The request body payload.
+ * @param ensureSuccess If true, throws an exception if the response code is not 2xx.
+ * @return The HTTP [Response].
+ */
+suspend fun OkHttpClient.post(
+    url: String,
+    headers: Headers,
+    fetch: Fetch,
+    body: RequestBody,
+    ensureSuccess: Boolean = true,
+): Response = post(url.toHttpUrl(), headers, fetch, body, ensureSuccess)
+
+/**
+ * Executes a POST request asynchronously the way a browser would make it, automatically retrieving the headers from
+ * the current [HttpSource] context receiver.
+ *
+ * @param url The [HttpUrl] to request.
+ * @param fetch How a browser would make the request, see [Fetch].
+ * @param body The request body payload.
+ * @param ensureSuccess If true, throws an exception if the response code is not 2xx.
+ * @return The HTTP [Response].
+ */
+context(source: HttpSource)
+suspend fun OkHttpClient.post(
+    url: HttpUrl,
+    fetch: Fetch,
+    body: RequestBody,
+    ensureSuccess: Boolean = true,
+): Response = post(url, source.headers, fetch, body, ensureSuccess)
+
+/**
+ * Executes a POST request asynchronously using a URL string the way a browser would make it, automatically
+ * retrieving the headers from the current [HttpSource] context receiver.
+ *
+ * @param url The URL string to request.
+ * @param fetch How a browser would make the request, see [Fetch].
+ * @param body The request body payload.
+ * @param ensureSuccess If true, throws an exception if the response code is not 2xx.
+ * @return The HTTP [Response].
+ */
+context(source: HttpSource)
+suspend fun OkHttpClient.post(
+    url: String,
+    fetch: Fetch,
+    body: RequestBody,
+    ensureSuccess: Boolean = true,
+): Response = post(url.toHttpUrl(), source.headers, fetch, body, ensureSuccess)
+
+/**
+ * Executes a [Request] built by hand asynchronously and returns the response, for what the helpers above don't
+ * cover: other methods, or a request built from another one. It goes out as built unless it has a [Fetch] set with
+ * `Request.Builder.fetch`.
+ *
+ * @param request The request to send.
+ * @param ensureSuccess If true, throws an exception if the response code is not 2xx.
+ * @return The HTTP [Response].
+ */
+suspend fun OkHttpClient.call(
+    request: Request,
+    ensureSuccess: Boolean = true,
+): Response {
+    val call = newCall(request)
+    return if (ensureSuccess) call.awaitSuccess() else call.await()
+}
+
+/**
  * Executes a PUT request asynchronously and returns the response.
  *
  * @param url The [HttpUrl] to request.
@@ -186,20 +352,14 @@ suspend fun OkHttpClient.put(
     headers: Headers,
     body: RequestBody,
     ensureSuccess: Boolean = true,
-): Response {
-    val request = Request.Builder()
+): Response = call(
+    Request.Builder()
         .url(url)
         .headers(headers)
         .put(body)
-        .build()
-    val call = newCall(request)
-
-    return if (ensureSuccess) {
-        call.awaitSuccess()
-    } else {
-        call.await()
-    }
-}
+        .build(),
+    ensureSuccess,
+)
 
 /**
  * Executes a PUT request asynchronously using a URL string and returns the response.
@@ -263,21 +423,15 @@ suspend fun OkHttpClient.head(
     headers: Headers,
     cacheControl: CacheControl = DEFAULT_CACHE_CONTROL,
     ensureSuccess: Boolean = true,
-): Response {
-    val request = Request.Builder()
+): Response = call(
+    Request.Builder()
         .url(url)
         .headers(headers)
         .cacheControl(cacheControl)
         .head()
-        .build()
-    val call = newCall(request)
-
-    return if (ensureSuccess) {
-        call.awaitSuccess()
-    } else {
-        call.await()
-    }
-}
+        .build(),
+    ensureSuccess,
+)
 
 /**
  * Executes a HEAD request asynchronously using a URL string and returns the response.
