@@ -27,7 +27,7 @@ import java.util.Locale
 
 class TempleScanEsp :
     Madara(
-        "Temple Scan",
+        "Aedex",
         "https://aedexnox.kawi.lat",
         "es",
         dateFormat = SimpleDateFormat("MMMM dd, yyyy", Locale("es")),
@@ -77,6 +77,8 @@ class TempleScanEsp :
             return@lazy preferences.prefBaseUrl
         }
     }
+
+    override val id = 3451196845457607826L
 
     override val versionId = 4
 
