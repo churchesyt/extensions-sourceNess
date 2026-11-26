@@ -5,10 +5,10 @@ import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import keiyoushi.network.get
 import keiyoushi.network.rateLimit
 import keiyoushi.source.KeiSource
+import keiyoushi.source.SMangaUpdate
 import keiyoushi.utils.asJsoup
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonElement
@@ -114,7 +114,7 @@ abstract class MCCMS : KeiSource() {
     override fun getChapterUrl(chapter: SChapter) = baseUrl + chapter.url
 
     // Don't send referer
-    override fun imageRequest(page: Page) = super.imageRequest(page).newBuilder().headers(pcHeaders).build()
+    override fun getImageRequest(page: Page) = super.getImageRequest(page).newBuilder().headers(pcHeaders).build()
 
     private inline fun <reified T> Response.parseAs(): T = parseAsRaw<ResultDto<T>>().data
 

@@ -18,10 +18,10 @@ import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import keiyoushi.network.get
 import keiyoushi.network.rateLimit
 import keiyoushi.source.KeiSource
+import keiyoushi.source.SMangaUpdate
 import keiyoushi.utils.asJsoup
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
@@ -557,7 +557,7 @@ abstract class MangaBox :
         }
     }
 
-    override fun imageRequest(page: Page): Request = GET(
+    override fun getImageRequest(page: Page): Request = GET(
         page.imageUrl!!,
         headers, // Headers are sometimes not added for image requests for some reason
     )

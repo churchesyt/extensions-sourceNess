@@ -11,10 +11,10 @@ import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import keiyoushi.network.get
 import keiyoushi.network.post
 import keiyoushi.source.KeiSource
+import keiyoushi.source.SMangaUpdate
 import keiyoushi.utils.asJsoup
 import keiyoushi.utils.firstInstanceOrNull
 import keiyoushi.utils.getPreferencesLazy
@@ -197,7 +197,7 @@ abstract class InitManga :
         val manga = SManga.create().apply {
             this.url = "/$mangaUrlDirectory/$slug/"
         }
-        return fetchMangaUpdate(manga, emptyList(), true, false).manga.apply {
+        return fetchMangaUpdate(manga, emptyList(), true, false).manga().apply {
             this.url = manga.url
             initialized = true
         }

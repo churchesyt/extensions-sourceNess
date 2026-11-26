@@ -5,11 +5,11 @@ import eu.kanade.tachiyomi.network.HttpException
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import keiyoushi.lib.i18n.Intl
 import keiyoushi.network.get
 import keiyoushi.network.post
 import keiyoushi.source.KeiSource
+import keiyoushi.source.SMangaUpdate
 import keiyoushi.utils.asJsoup
 import keiyoushi.utils.parseAs
 import kotlinx.coroutines.async
@@ -437,7 +437,7 @@ abstract class MadaraBase : KeiSource() {
         return cipher.doFinal(Base64.decode(data.ciphertext, Base64.DEFAULT)).toString(Charsets.UTF_8)
     }
 
-    override fun imageRequest(page: Page) = super.imageRequest(page).newBuilder().header("Referer", page.url).build()
+    override fun getImageRequest(page: Page) = super.getImageRequest(page).newBuilder().header("Referer", page.url).build()
 
     protected open fun imageFromElement(element: Element): String? = when {
         element.hasAttr("data-src") -> element.attr("abs:data-src")

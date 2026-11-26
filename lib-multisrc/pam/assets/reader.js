@@ -5,7 +5,7 @@
     if (window[installed]) return;
     window[installed] = true;
 
-    const post = (reader) => window[bridge].post(JSON.stringify({ reader }));
+    const post = (reader) => window[bridge].postMessage(JSON.stringify({ reader }));
     const defineProperty = Object.defineProperty;
 
     // Proxied native getters, so they still read as native code
