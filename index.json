@@ -15771,20 +15771,19 @@
     ]
   },
   {
-    "name": "Tachiyomi: Temple Scan(Ness)",
+    "name": "Tachiyomi: Temple Scan",
     "pkg": "eu.kanade.tachiyomi.extension.en.templescan",
-    "apk": "tachiyomi-en.templescan-v1.4.47.apk",
+    "apk": "tachiyomi-en.templescan-v1.6.70.apk",
     "lang": "en",
-    "code": 47,
-    "version": "1.4.47",
+    "code": 106070,
+    "version": "1.6.70",
     "nsfw": 1,
     "sources": [
       {
         "name": "Temple Scan",
         "lang": "en",
         "id": "4210732525216763379",
-        "baseUrl": "https://templetoons.com",
-        "versionId": 3
+        "baseUrl": "https://templetoons.com"
       }
     ]
   },
@@ -18549,20 +18548,19 @@
     ]
   },
   {
-    "name": "Tachiyomi: Temple Scan(Ness)",
+    "name": "Tachiyomi: Aedex",
     "pkg": "eu.kanade.tachiyomi.extension.es.templescanesp",
-    "apk": "tachiyomi-es.templescanesp-v1.4.53.apk",
+    "apk": "tachiyomi-es.templescanesp-v1.6.82.apk",
     "lang": "es",
-    "code": 53,
-    "version": "1.4.53",
+    "code": 106082,
+    "version": "1.6.82",
     "nsfw": 1,
     "sources": [
       {
-        "name": "Temple Scan",
+        "name": "Aedex",
         "lang": "es",
-        "id": "3451196845457607826",
-        "baseUrl": "https://aedexnox.kawi.lat",
-        "versionId": 4
+        "id": "4334604114708629478",
+        "baseUrl": "https://aedexnox.com"
       }
     ]
   },
